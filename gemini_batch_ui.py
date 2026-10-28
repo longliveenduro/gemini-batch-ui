@@ -1,9 +1,11 @@
 """Lokale Batch- und Synchron-UI für Gemini 4 Argon (Streamlit).
 
-Start:    pip install -U -r requirements.txt && streamlit run gemini_batch_ui.py
+Start:    pip install -r requirements.txt && streamlit run gemini_batch_ui.py
 API-Key:  Umgebungsvariable GEMINI_API_KEY oder Seitenleiste.
 Modi:     Batch (asynchron, 50 % Rabatt) oder Synchron (nacheinander, impliziter Cache über alle Prompts,
           optional in Gesprächen: je N Prompts bilden einen gemeinsamen Kontext, das nächste Gespräch beginnt neu).
+Dateien:  batch_jobs.json (Verlauf und Ergebnisse), pdf_files.json (hochgeladene PDFs), requests_*.jsonl
+          (gesendete Batch-Anfragen), token.json und credentials.json (Drive-Zugang, nicht weitergeben).
 Drive:    (optional) In der Google Cloud Console die Drive API aktivieren, eine OAuth-Client-ID
           vom Typ „Desktop-App“ erstellen und als credentials.json neben dieses Skript legen.
           Beim ersten Zugriff öffnet sich der Browser zur Freigabe (nur Lesezugriff).
@@ -33,6 +35,12 @@ DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_S
 BATCH_MAX_OUT = 32768      # Batch-Anfragen unterstützen kein Long Decode
 SYNC_MAX_OUT = 1_048_576   # synchron: Long Decode über das SDK (ab google-genai 2.30.1)
 SYNC_TIMEOUT_MS = 25 * 60 * 1000  # Argon-Aufrufe können lange laufen (Doku: mindestens 20 Minuten)
+MAX_POLL_ERRORS = 3        # so viele Abruffehler hintereinander, dann stoppt die automatische Prüfung
+TABS = ["Neue Anfrage", "Jobs und Ergebnisse"]
+MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
+MODE_SYNC = "Synchron (nacheinander, Cache-Treffer möglich)"
+THINK_LEVELS = ["Standard", "low", "medium", "high"]
+HINT = " (bitte den Tab nicht wechseln)"
 
 st.set_page_config(page_title="Gemini Argon", layout="wide")
 
@@ -45,7 +53,13 @@ def runtime():
 
 
 def load_jobs():
-    return json.loads(HISTORY.read_text("utf-8")) if HISTORY.exists() else []
+    if not HISTORY.exists():
+        return []
+    try:
+        return json.loads(HISTORY.read_text("utf-8"))
+    except json.JSONDecodeError:  # beschädigte Datei sichern, statt die App abstürzen zu lassen
+        HISTORY.rename(HISTORY.with_name(f"batch_jobs.defekt-{int(time.time())}.json"))
+        return []
 
 
 def mutate_jobs(lock, change):
@@ -60,6 +74,7 @@ def mutate_jobs(lock, change):
 
 # ---------- Google Drive ----------
 def drive_service():
+    from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
@@ -69,9 +84,11 @@ def drive_service():
     if Path("token.json").exists():
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+        try:
+            if not (creds and creds.expired and creds.refresh_token):
+                raise RefreshError("kein gültiger Login")
             creds.refresh(Request())
-        else:
+        except RefreshError:  # keine, abgelaufene oder widerrufene Freigabe (z. B. nach 7 Tagen im Testmodus)
             if not Path("credentials.json").exists():
                 raise FileNotFoundError("credentials.json fehlt (Anleitung oben im Skript).")
             creds = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES).run_local_server(port=0)
@@ -192,9 +209,22 @@ def refresh(client, j):
     state, rows = job.state.name, None
     if state == "JOB_STATE_SUCCEEDED" and job.dest and job.dest.file_name:
         rows = parse_results(client.files.download(file=job.dest.file_name), j["prompts"])
-    st.session_state["res:" + j["name"]] = {
-        "state": state, "rows": rows, "error": str(job.error) if job.error else None, "model": job.model,
-    }
+    err = str(job.error) if job.error else None
+    st.session_state["res:" + j["name"]] = {"state": state, "rows": rows, "error": err, "model": job.model}
+    if state in DONE:  # Endergebnis lokal sichern: bleibt nach Ablauf bei Google erhalten und lädt ohne Abruf
+        def save(jobs):
+            for x in jobs:
+                if x["name"] == j["name"]:
+                    x.update(state=state, rows=rows, error=err, api_model=job.model)
+        mutate_jobs(runtime().lock, save)
+
+
+def batch_info(j):
+    """Stand eines Batches: aus der laufenden Sitzung, sonst aus der lokalen Sicherung des Endergebnisses."""
+    info = st.session_state.get("res:" + j["name"])
+    if info is None and j.get("state") in DONE:
+        info = {"state": j["state"], "rows": j.get("rows"), "error": j.get("error"), "model": j.get("api_model")}
+    return info
 
 
 # ---------- Synchroner Modus (Hintergrund-Thread, kein Streamlit-Aufruf darin) ----------
@@ -251,14 +281,16 @@ def run_sync(client, rt, name, model, pdf_uris, prompts, system, think, max_out,
             # PDFs stehen in jeder Anfrage (im Gespräch: im ersten Prompt) ganz vorn -> identischer Prefix fürs Caching
             parts = [types.Part.from_uri(file_uri=u, mime_type="application/pdf") for u in pdf_uris] if not history else []
             user = types.Content(role="user", parts=parts + [types.Part(text=prompt)])
-            reply = None
+            reply, started = None, time.time()
             try:
                 resp = ask(client, model, history + [user], cfg)
                 line = {"key": key, "response": resp.model_dump(mode="json", by_alias=True, exclude_none=True)}
                 reply = resp.candidates[0].content if resp.candidates else None
             except Exception as e:
                 line = {"key": key, "error": str(e)}
-            add_row(parse_line(line, prompts))
+            row = parse_line(line, prompts)
+            row["secs"] = round(time.time() - started)
+            add_row(row)
             if group > 1:
                 if reply and reply.parts:  # Antwort unverändert zurückgeben, damit Signaturen erhalten bleiben
                     history += [user, reply]
@@ -276,7 +308,8 @@ def start_sync(client, rt, model, pdfs, pdf_names, prompts, system, think, max_o
     keyed = {f"prompt-{i}": p for i, p in enumerate(prompts, 1)}
     entry = {"name": name, "mode": "sync", "state": "RUNNING", "label": label, "model": model,
              "pdf": ", ".join(pdf_names) or None, "pdfs": list(pdf_names),
-             "prompts": keyed, "think": think, "max_out": int(max_out), "group": int(group), "rows": [],
+             "prompts": keyed, "system": system, "think": think, "max_out": int(max_out), "group": int(group),
+             "rows": [],
              "created": datetime.now().isoformat(timespec="seconds")}
     mutate_jobs(rt.lock, lambda jobs: jobs.insert(0, entry))
     thread = threading.Thread(
@@ -285,7 +318,7 @@ def start_sync(client, rt, model, pdfs, pdf_names, prompts, system, think, max_o
     )
     rt.threads[name] = thread
     thread.start()
-    return name
+    return entry
 
 
 def sync_view(rt, name):
@@ -313,11 +346,15 @@ def show_rows(j, rows):
                 st.markdown(r["text"])
             else:
                 st.error(str(r["error"]))
-            if r.get("finish") == "MAX_TOKENS":
+            fin = r.get("finish")
+            if fin == "MAX_TOKENS":
                 st.warning("Abgeschnitten: Denk- und Ausgabe-Token haben das Limit erreicht.")
-            st.caption(f"Modell {r.get('model', '?')}, Ende: {r.get('finish', '?')}, "
+            elif fin not in (None, "STOP", "unbekannt"):
+                st.warning(f"Die Antwort endete mit dem Grund „{fin}“ und ist möglicherweise unvollständig.")
+            st.caption(f"Modell {r.get('model', '?')}, Ende: {fin or '?'}, "
                        f"Eingabe {r['in']:,} (Cache {r['cached']:,}), "
-                       f"Denken {r['think']:,}, Ausgabe {r['out']:,} Token")
+                       f"Denken {r['think']:,}, Ausgabe {r['out']:,} Token"
+                       + (f", Dauer {r['secs']} s" if r.get("secs") is not None else ""))
             if r.get("usage"):
                 st.json(r["usage"], expanded=False)
 
@@ -354,6 +391,7 @@ def job_panel(client, rt, j, polling):
     if j.get("mode") == "sync":
         return sync_panel(rt, j["name"], polling)
     name = j["name"]
+    errn_key, err_key = f"errn:{name}", f"err:{name}"
     b1, b2, _ = st.columns([1, 1, 3])
     manual = b1.button("Status prüfen / Ergebnisse laden", key="chk:" + name)
     if b2.button("Batch abbrechen", key="cx:" + name):
@@ -365,19 +403,64 @@ def job_panel(client, rt, j, polling):
     if manual or polling:
         try:
             refresh(client, j)
+            st.session_state[errn_key] = 0
         except Exception as e:
-            st.error(f"Abruf fehlgeschlagen: {e}")
-    info = st.session_state.get("res:" + name)
-    if polling and info and info["state"] in DONE:
-        st.rerun()  # Batch fertig: ein kompletter Rerun beendet die automatische Prüfung
+            fatal = getattr(e, "code", None) in (403, 404)  # Batch existiert nicht mehr oder ist nicht zugänglich
+            st.session_state[errn_key] = MAX_POLL_ERRORS if fatal else st.session_state.get(errn_key, 0) + 1
+            st.session_state[err_key] = str(e)
+    info = batch_info(j)
+    stopped = st.session_state.get(errn_key, 0) >= MAX_POLL_ERRORS
+    if polling and ((info and info["state"] in DONE) or stopped):
+        st.rerun()  # fertig oder aufgegeben: ein kompletter Rerun beendet die automatische Prüfung
     if polling:
         st.caption(f"Automatische Prüfung alle {POLL_SECONDS} Sekunden, zuletzt um {datetime.now():%H:%M:%S}.")
+    if st.session_state.get(errn_key, 0) > 0:
+        hint = " Die automatische Prüfung ist gestoppt, „Status prüfen“ versucht es erneut." if stopped else ""
+        st.error(f"Abruf fehlgeschlagen: {st.session_state.get(err_key)}{hint}")
     if not info:
         return
+    if "res:" + name not in st.session_state:
+        st.caption("Gesichertes Endergebnis aus batch_jobs.json, kein Abruf bei Google nötig.")
     st.write(f"Status: **{info['state']}**, Modell laut API: **{info.get('model') or 'unbekannt'}**")
     if info["error"]:
         st.error(info["error"])
     show_rows(j, info["rows"] or [])
+
+
+# ---------- Verlauf und Formular ----------
+def entry_label(x):
+    return f"{x['label']} ({x['created'][:16].replace('T', ' ')}) {x['name'][-6:]}"
+
+
+def reuse_inputs(j):
+    """Callback: Prompts und Einstellungen eines Eintrags ins Formular „Neue Anfrage“ übernehmen."""
+    ss, is_sync = st.session_state, j.get("mode") == "sync"
+    ss["mode"] = MODE_SYNC if is_sync else MODE_BATCH
+    ss["raw"] = "\n---\n".join(j["prompts"].values())
+    ss["system"] = j.get("system", "")
+    if j.get("think") in THINK_LEVELS:
+        ss["think"] = j["think"]
+    if j.get("max_out"):
+        cap = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT) if is_sync else BATCH_MAX_OUT
+        ss["max_sync" if is_sync else "max_batch"] = max(256, min(int(j["max_out"]), cap))
+    if is_sync:
+        ss["group"] = min(max(int(j.get("group") or 1), 1), 50)
+    pdfs = j.get("pdf")
+    note = f"Eingaben aus „{j['label']}“ übernommen."
+    if pdfs:
+        note += f" Bitte die PDFs erneut anhängen: {pdfs}. Schon hochgeladene Dateien werden wiederverwendet."
+    ss["reused_note"] = note
+    ss["view"] = TABS[0]  # wechselt zum Tab „Neue Anfrage“ (ab Streamlit 1.55)
+
+
+def delete_entry(name):
+    """Callback: Eintrag samt lokal gesicherter Ergebnisse aus dem Verlauf entfernen (bei Google bleibt alles)."""
+    def change(jobs):
+        jobs[:] = [x for x in jobs if x["name"] != name]
+    mutate_jobs(runtime().lock, change)
+    for prefix in ("res:", "err:", "errn:"):
+        st.session_state.pop(prefix + name, None)
+    st.session_state.pop("sel", None)
 
 
 # ---------- UI ----------
@@ -390,7 +473,6 @@ if not api_key:
 client = genai.Client(api_key=api_key)
 rt = runtime()
 
-TABS = ["Neue Anfrage", "Jobs und Ergebnisse"]
 try:  # ab Streamlit 1.55 weiß die App, welcher Tab offen ist
     tab_new, tab_jobs = st.tabs(TABS, key="view", on_change="rerun")
 except TypeError:
@@ -398,9 +480,11 @@ except TypeError:
 on_jobs_tab = getattr(tab_jobs, "open", None) is not False  # ältere Versionen: immer prüfen
 
 with tab_new:
-    mode = st.radio("Modus", ["Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)",
-                              "Synchron (nacheinander, Cache-Treffer möglich)"], horizontal=True)
-    sync = mode.startswith("Synchron")
+    note = st.session_state.pop("reused_note", None)
+    if note:
+        st.info(note)
+    mode = st.radio("Modus", [MODE_BATCH, MODE_SYNC], horizontal=True, key="mode")
+    sync = mode == MODE_SYNC
     uploads = st.file_uploader("PDF-Dateien (mehrere möglich)", type="pdf", accept_multiple_files=True)
     with st.container(border=True):
         st.markdown("**PDFs aus Google Drive hinzufügen** (optional)")
@@ -426,14 +510,14 @@ with tab_new:
     else:
         st.caption("Kein PDF angehängt: Die Prompts werden ohne PDF gesendet.")
 
-    system = st.text_area("Systemanweisung (optional)", height=80)
-    raw = st.text_area("Prompts (mehrere mit einer Zeile --- trennen)", height=260)
+    system = st.text_area("Systemanweisung (optional)", height=80, key="system")
+    raw = st.text_area("Prompts (mehrere mit einer Zeile --- trennen)", height=260, key="raw")
     prompts = [p.strip() for p in re.split(r"^\s*---\s*$", raw, flags=re.M) if p.strip()]
     group = 1
     if sync:
         gcol, _ = st.columns([1, 3])
         group = int(gcol.number_input(
-            "Prompts pro Gespräch", 1, 50, 1, step=1, key="group",
+            "Prompts pro Gespräch", min_value=1, max_value=50, step=1, key="group",
             help="1: Jeder Prompt läuft für sich. 2: Je zwei Prompts bilden ein Gespräch (der zweite sieht den ersten "
                  "und dessen Antwort), die nächsten zwei ein neues Gespräch usw. Die PDFs gehen in jedem Gespräch mit "
                  "dem ersten Prompt raus."))
@@ -442,14 +526,17 @@ with tab_new:
         st.warning(f"Dein google-genai ({genai.__version__}) ist älter als 2.30.1, daher ist die Ausgabe auf "
                    f"{BATCH_MAX_OUT} Token begrenzt. Aktualisieren: pip install -U google-genai")
     c1, c2, c3 = st.columns(3)
-    think = c1.selectbox("Denktiefe", ["Standard", "low", "medium", "high"], index=3)
+    st.session_state.setdefault("think", "high")
+    think = c1.selectbox("Denktiefe", THINK_LEVELS, key="think")
     if sync:
         cap = SYNC_MAX_OUT if sdk_ok else BATCH_MAX_OUT
-        max_out = c2.number_input("Max. Ausgabe-Token", 256, cap, min(65536, cap), step=1024, key="max_sync",
+        st.session_state.setdefault("max_sync", min(65536, cap))
+        max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=cap, step=1024, key="max_sync",
                                   help="Über 32768 setzt das SDK automatisch Long Decode ein "
                                        "(mehrere Teilanfragen, eine zusammengesetzte Antwort).")
     else:
-        max_out = c2.number_input("Max. Ausgabe-Token", 256, BATCH_MAX_OUT, BATCH_MAX_OUT, step=1024, key="max_batch",
+        st.session_state.setdefault("max_batch", BATCH_MAX_OUT)
+        max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=BATCH_MAX_OUT, step=1024, key="max_batch",
                                   help="Im Batch-Betrieb begrenzt die API die Ausgabe auf 32768 Token.")
     kind = "sync" if sync else "batch"
     label = c3.text_input("Name", f"{kind}-{datetime.now():%Y%m%d-%H%M}", key="label_" + kind)
@@ -480,10 +567,10 @@ with tab_new:
 
     if st.button("Synchron starten" if sync else "Batch starten", type="primary", disabled=not prompts):
         try:
-            with st.status("Bereite Anfragen vor …") as status:
+            with st.status("Bereite Anfragen vor …" + HINT) as status:
                 files = [(f.name, f.getvalue()) for f in uploads]
                 if drive_refs:
-                    status.update(label="Lade PDFs aus Google Drive …")
+                    status.update(label="Lade PDFs aus Google Drive …" + HINT)
                     files += [drive_fetch(ref) for ref in drive_refs]
                 unique, seen = [], set()
                 for fname, data in files:  # gleiche Dateien nur einmal senden
@@ -493,24 +580,24 @@ with tab_new:
                         unique.append((fname, data))
                 names, pdfs = [n for n, _ in unique], []
                 for k, (fname, data) in enumerate(unique, 1):
-                    status.update(label=f"Lade PDF {k} von {len(unique)} zu Gemini hoch …")
+                    status.update(label=f"Lade PDF {k} von {len(unique)} zu Gemini hoch …" + HINT)
                     pdfs.append(upload_pdf(client, fname, data))
-                status.update(label="Starte …")
+                status.update(label="Starte …" + HINT)
                 if sync:
-                    job_name = start_sync(client, rt, model, pdfs, names, prompts, system.strip(), think, max_out, label, group)
+                    entry = start_sync(client, rt, model, pdfs, names, prompts, system.strip(), think, max_out, label, group)
                 else:
                     job, keyed = start_batch(client, model, pdfs, prompts, system.strip(), think, max_out, label)
-                    job_name = job.name
-                    entry = {"name": job_name, "label": label, "model": model, "pdf": ", ".join(names) or None,
-                             "pdfs": names, "prompts": keyed, "think": think, "max_out": int(max_out),
-                             "created": datetime.now().isoformat(timespec="seconds")}
+                    entry = {"name": job.name, "label": label, "model": model, "pdf": ", ".join(names) or None,
+                             "pdfs": names, "prompts": keyed, "system": system.strip(), "think": think,
+                             "max_out": int(max_out), "created": datetime.now().isoformat(timespec="seconds")}
                     mutate_jobs(rt.lock, lambda jobs: jobs.insert(0, entry))
                 status.update(label="Gestartet", state="complete")
+            st.session_state["sel"] = entry_label(entry)  # der neue Eintrag ist im Jobs-Tab vorausgewählt
             if sync:
-                st.success(f"{job_name} läuft im Hintergrund. Fortschritt und Ergebnisse siehst du im Tab "
+                st.success(f"{entry['name']} läuft im Hintergrund. Fortschritt und Ergebnisse siehst du im Tab "
                            "„Jobs und Ergebnisse“.")
             else:
-                st.success(f"{job_name} läuft. Im Tab „Jobs und Ergebnisse“ wird der Status alle "
+                st.success(f"{entry['name']} läuft. Im Tab „Jobs und Ergebnisse“ wird der Status alle "
                            f"{POLL_SECONDS} Sekunden geprüft.")
         except Exception as e:
             st.error(f"Start fehlgeschlagen: {e}")
@@ -520,8 +607,10 @@ with tab_jobs:
     if not jobs:
         st.info("Noch nichts gestartet.")
     else:
-        opts = {f"{x['label']} ({x['created'][:16].replace('T', ' ')}) {x['name'][-6:]}": x for x in jobs}
-        j = opts[st.selectbox("Eintrag", list(opts))]
+        opts = {entry_label(x): x for x in jobs}
+        if st.session_state.get("sel") not in opts:
+            st.session_state.pop("sel", None)
+        j = opts[st.selectbox("Eintrag", list(opts), key="sel")]
         is_sync = j.get("mode") == "sync"
         grp = j.get("group") or (len(j["prompts"]) if j.get("chat") else 1)
         kind_txt = (f"synchron, {grp} Prompts pro Gespräch" if grp > 1 else "synchron") if is_sync else "Batch"
@@ -531,7 +620,15 @@ with tab_jobs:
         if is_sync:
             running = sync_view(rt, j["name"])[1] == "RUNNING"
         else:
-            info = st.session_state.get("res:" + j["name"])
-            running = not (info and info["state"] in DONE)
+            info = batch_info(j)
+            failed = st.session_state.get("errn:" + j["name"], 0) >= MAX_POLL_ERRORS
+            running = not ((info and info["state"] in DONE) or failed)
+        a1, a2, _ = st.columns([1, 1, 3])
+        a1.button("Eingaben übernehmen", on_click=reuse_inputs, args=(j,), key="reuse:" + j["name"],
+                  help="Übernimmt Prompts und Einstellungen ins Formular „Neue Anfrage“.")
+        with a2.popover("Eintrag löschen", disabled=running):
+            st.write("Entfernt den Eintrag samt lokal gesicherter Ergebnisse aus dem Verlauf. "
+                     "Bei Google bleibt alles unverändert.")
+            st.button("Ja, endgültig löschen", on_click=delete_entry, args=(j["name"],), key="del:" + j["name"])
         polling = on_jobs_tab and running
         st.fragment(run_every=POLL_SECONDS if polling else None)(job_panel)(client, rt, j, polling)
