@@ -1,0 +1,7 @@
+*.jsonl
+credentials.json
+batch_jobs.json
+token.json
+pdf_files.json
+Gemini4BatchApiKey.txt
+
