@@ -5,7 +5,7 @@ Lokale Streamlit-Oberfläche, um **Gemini 4 Argon** (`gemini-4-argon`) mit **ein
 - **Batch**: asynchron, 50 % des Standardpreises, Ergebnis nach Minuten bis Stunden.
 - **Synchron**: Prompts laufen nacheinander im Hintergrund, mit Aussicht auf Cache-Treffer für das PDF. Optional bilden je N Prompts ein Gespräch (gemeinsamer Kontext).
 
-Dokumentationsstand: 28.10.2026 (Streamlit 1.66, google-genai 2.31, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
+Dokumentationsstand: 29.10.2026 (Streamlit 1.66, google-genai 2.31, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
 
 ## Inhalt
 
@@ -48,10 +48,11 @@ Dokumentationsstand: 28.10.2026 (Streamlit 1.66, google-genai 2.31, Gemini 4 Arg
 - **Denktiefe** (`low`, `medium`, `high`, oder „Standard“ = nichts senden) und **max. Ausgabe-Token**.
 - **Gespräche (nur synchron)**: „Prompts pro Gespräch“ = N. Je N aufeinanderfolgende Prompts teilen einen Kontext, das nächste Gespräch beginnt neu.
 - **Jobs und Ergebnisse**: Verlauf aller Läufe, automatische Statusprüfung alle 10 Sekunden solange der Tab offen ist, Ergebnisse mit Token- und Cache-Angaben, Markdown-Download, Rohdaten-JSON.
-- **Lokale Sicherung** der Ergebnisse (`batch_jobs.json`), auch nach Ablauf der Aufbewahrung bei Google.
+- **Lokale Sicherung** der Ergebnisse (`data/batch_jobs.json`), auch nach Ablauf der Aufbewahrung bei Google.
 - **Eingaben übernehmen**: Prompts und Einstellungen eines früheren Eintrags zurück ins Formular holen. **Eintrag löschen** (nur lokal).
-- **Wiederverwendung hochgeladener PDFs** über Neustarts hinweg (`pdf_files.json`), damit die Datei-Referenz gleich bleibt.
+- **Wiederverwendung hochgeladener PDFs** über Neustarts hinweg (`data/pdf_files.json`), damit die Datei-Referenz gleich bleibt.
 - **Drive-Anmeldung erneuert sich selbst**, wenn die Freigabe abgelaufen ist.
+- **Aufgeräumte Ordner**: Zugangsdaten in `conf/`, erzeugte Daten in `data/`. Dateien eines älteren Stands werden beim Start dorthin übernommen.
 
 ## 3. Schnellstart
 
@@ -87,7 +88,7 @@ export GEMINI_API_KEY="dein-key"      # optional, sonst in der Seitenleiste eint
 streamlit run gemini_batch_ui.py      # öffnet http://localhost:8501
 ```
 
-Anderer Port: `streamlit run gemini_batch_ui.py --server.port 8502`. Beenden mit Strg+C. Laufende synchrone Läufe brechen dann ab und erscheinen später als „unterbrochen“.
+Anderer Port: `streamlit run gemini_batch_ui.py --server.port 8502`. Beenden mit Strg+C. Laufende synchrone Läufe brechen dann ab und erscheinen später als „unterbrochen“. Beim ersten Start legt die App die Ordner `conf/` und `data/` neben `gemini_batch_ui.py` an (Abschnitt 7).
 
 **Erster Lauf in 60 Sekunden**
 
@@ -153,7 +154,7 @@ Implizites Caching vergleicht den **Anfang (Prefix)** einer Anfrage mit frühere
 
 - Nichts Variables (Zeitstempel, IDs, Prompt-Text) vor die PDFs setzen.
 - Andere PDF-Menge oder -Reihenfolge, andere Systemanweisung oder anderes Modell ergeben einen anderen Prefix und damit keine Treffer.
-- Hochgeladene PDFs werden über ihren SHA-256 in `pdf_files.json` gemerkt, damit dieselbe Datei-Referenz (URI) auch nach einem Neustart benutzt wird, solange die Files API sie noch hält (derzeit 48 Stunden). Ob Google intern Dateiinhalt oder Datei-Referenz vergleicht, ist nicht dokumentiert. Eine gleiche Referenz ist der sicherere Weg.
+- Hochgeladene PDFs werden über ihren SHA-256 in `data/pdf_files.json` gemerkt, damit dieselbe Datei-Referenz (URI) auch nach einem Neustart benutzt wird, solange die Files API sie noch hält (derzeit 48 Stunden). Ob Google intern Dateiinhalt oder Datei-Referenz vergleicht, ist nicht dokumentiert. Eine gleiche Referenz ist der sicherere Weg.
 - **Synchron** sendet strikt nacheinander. Die erste Anfrage füllt den Cache (zeigt meist „Cache 0“), die folgenden können treffen. Zeitliche Nähe hilft, eine Garantie gibt es nicht.
 - **Batch** läuft asynchron, die Verarbeitungszeitpunkte bestimmt Google. Zu implizitem Caching im Batch steht in der Doku nichts. Die Batch-Doku nennt Caching dort nur über `cached_content` (explizit, bei Argon nicht möglich).
 - **Gespräche** (Prompts pro Gespräch > 1): Der zweite Prompt sendet den ganzen Verlauf erneut (PDFs, erster Prompt, Antwort, zweiter Prompt). Der Anfang bis einschließlich erstem Prompt ist identisch zur vorherigen Anfrage und kann gecacht werden. Die neue Antwort und der neue Prompt werden normal berechnet. Jedes neue Gespräch beginnt wieder mit denselben PDFs, deshalb kann das PDF auch über Gesprächsgrenzen hinweg gecacht werden.
@@ -169,14 +170,19 @@ Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token
 
 - Seitenleiste „Gemini API-Key“ (Passwortfeld) oder Umgebungsvariable `GEMINI_API_KEY` (wird als Vorbelegung genutzt). Der Key wird nicht gespeichert.
 - Seitenleiste „Modell“, Voreinstellung `gemini-4-argon`. Andere Modelle sind möglich, aber die App ist auf Argon zugeschnitten (Batch-Limit, `thinking_level`-Werte, Caching-Annahmen).
+- Optional die Umgebungsvariable `GEMINI_UI_HOME`: Ordner, unter dem `conf/` und `data/` liegen. Voreinstellung ist der Ordner von `gemini_batch_ui.py`, unabhängig vom Arbeitsordner. Nützlich für getrennte Datenbestände und für Tests.
 
 ### 6.2 Konstanten im Code (Kopf von `gemini_batch_ui.py`)
 
 | Konstante | Wert | Bedeutung |
 |---|---|---|
 | `DEFAULT_MODEL` | `gemini-4-argon` | Voreinstellung Modell |
-| `HISTORY` | `batch_jobs.json` | Verlauf und Ergebnisse (relativ zum Arbeitsordner) |
-| `FILES_DB` | `pdf_files.json` | PDF-Hash → Datei in der Gemini Files API |
+| `BASE` | Ordner von `gemini_batch_ui.py`, oder `GEMINI_UI_HOME` | Wurzel für `conf/` und `data/` (`_base_dir()`) |
+| `CONF_DIR` | `BASE/conf` | Zugangsdaten, geheim |
+| `DATA_DIR` | `BASE/data` | erzeugte Daten |
+| `CREDENTIALS_FILE`, `TOKEN_FILE` | `conf/credentials.json`, `conf/token.json` | Drive-OAuth-Client und Drive-Login |
+| `HISTORY` | `data/batch_jobs.json` | Verlauf und Ergebnisse |
+| `FILES_DB` | `data/pdf_files.json` | PDF-Hash → Datei in der Gemini Files API |
 | `SCOPES` | `drive.readonly` | Drive-Berechtigung (nur lesen) |
 | `POLL_SECONDS` | `10` | Abstand der automatischen Prüfung |
 | `DONE` | 4 `JOB_STATE_*`-Endzustände | Wann ein Batch als abgeschlossen gilt |
@@ -199,6 +205,8 @@ fileWatcherType = "none"   # vermeidet „inotify watch limit reached“ unter L
 maxUploadSize = 500        # MB pro hochgeladener Datei (Standard 200)
 ```
 
+Streamlit liest diese Datei aus `.streamlit/` im **Arbeitsordner**, in dem `streamlit run` gestartet wird, nicht aus `conf/`. Am besten startet man die App im Projektordner.
+
 ### 6.4 Google Drive einrichten (optional)
 
 Nur nötig für „PDFs aus Google Drive hinzufügen“. Der Datei-Upload funktioniert ohne.
@@ -208,13 +216,13 @@ Nur nötig für „PDFs aus Google Drive hinzufügen“. Der Datei-Upload funkti
 3. **Google Auth Platform** (Menü) → „Get started“: App-Name, Support-E-Mail, Zielgruppe „External“ (mit Workspace-Konto „Internal“), Kontakt-E-Mail, Richtlinie akzeptieren.
 4. Nur bei „External“: unter „Audience“ die eigene Google-Adresse als **Test user** eintragen (sonst „Zugriff blockiert“).
 5. Unter „Data Access“ den Scope `https://www.googleapis.com/auth/drive.readonly` hinzufügen.
-6. Unter „Clients“ → „Create client“ → Anwendungstyp **Desktop-App** → JSON herunterladen und als `credentials.json` neben `gemini_batch_ui.py` legen.
-7. In der App „Meine PDFs aus Drive laden“. Beim ersten Zugriff öffnet sich der Browser zur Freigabe (Warnung „Google hat diese App nicht überprüft“ über „Erweitert“ bestätigen). Danach liegt `token.json` im Ordner.
+6. Unter „Clients“ → „Create client“ → Anwendungstyp **Desktop-App** → JSON herunterladen und als `conf/credentials.json` ablegen (der Ordner `conf/` liegt neben `gemini_batch_ui.py` und wird beim Start angelegt).
+7. In der App „Meine PDFs aus Drive laden“. Beim ersten Zugriff öffnet sich der Browser zur Freigabe (Warnung „Google hat diese App nicht überprüft“ über „Erweitert“ bestätigen). Danach liegt `conf/token.json` vor.
 
 Hinweise:
 
 - Im Status „Testing“ (Zielgruppe „External“) läuft die Freigabe nach **7 Tagen** ab. Die App öffnet dann selbstständig erneut den Browser zur Anmeldung (`drive_service()` fängt `RefreshError`). Dauerhaft vermeidet das „Publish app“ unter „Audience“ (Status „In production“, Warnung bleibt) oder ein Workspace-Konto mit „Internal“.
-- Ohne `credentials.json` meldet die App einen klaren Fehler. `token.json` zu löschen erzwingt eine neue Anmeldung.
+- Ohne `conf/credentials.json` meldet die App einen klaren Fehler samt Zielordner. `conf/token.json` zu löschen erzwingt eine neue Anmeldung.
 - Menünamen der Konsole können je nach Sprache und Version abweichen. Maßgeblich ist der Drive-Python-Quickstart (Abschnitt 13).
 
 ### 6.5 Abhängigkeiten
@@ -227,34 +235,36 @@ Hinweise:
 
 ## 7. Lokale Dateien und Datenformate
 
-Alle Dateien liegen **relativ zum Arbeitsordner**, in dem `streamlit run` gestartet wird.
+Die App legt `conf/` (Konfiguration und Zugangsdaten) und `data/` (erzeugte Daten) **neben `gemini_batch_ui.py`** an, unabhängig vom Arbeitsordner. Mit der Umgebungsvariable `GEMINI_UI_HOME` lässt sich ein anderer Ordner festlegen, unter dem beide liegen.
 
 ```text
 gemini-4-batch/
-├── gemini_batch_ui.py        # die gesamte App (eine Datei, bewusst)
+├── gemini_batch_ui.py              # die gesamte App (eine Datei, bewusst)
 ├── requirements.txt
 ├── README.md
-├── .streamlit/config.toml    # optional
-├── credentials.json          # optional, Drive-OAuth-Client, GEHEIM
-├── token.json                # automatisch, Drive-Login, GEHEIM
-├── batch_jobs.json           # automatisch: Verlauf + Ergebnisse (+ .tmp beim Schreiben)
-├── batch_jobs.defekt-<ts>.json  # automatisch: Sicherung, falls batch_jobs.json beschädigt war
-├── pdf_files.json            # automatisch: PDF-Hash -> Files-API-Name
-└── requests_<unixzeit>.jsonl # automatisch: je Batch die exakt gesendeten Anfragen
+├── .streamlit/config.toml          # optional, Streamlit-Einstellungen (aus dem Arbeitsordner gelesen)
+├── conf/                           # Konfiguration und Zugangsdaten, GEHEIM
+│   ├── credentials.json            # optional: Drive-OAuth-Client (von Hand hineinlegen)
+│   └── token.json                  # automatisch: Drive-Login
+└── data/                           # erzeugte Daten
+    ├── batch_jobs.json             # Verlauf + Ergebnisse (+ batch_jobs.tmp beim Schreiben)
+    ├── batch_jobs.defekt-<ts>.json # Sicherung, falls batch_jobs.json beschädigt war
+    ├── pdf_files.json              # PDF-Hash -> Files-API-Name
+    └── requests_<unixzeit>.jsonl   # je Batch die exakt gesendeten Anfragen
 ```
+
+**Übernahme älterer Stände.** Lagen `credentials.json`, `token.json`, `batch_jobs.json`, `pdf_files.json`, `requests_*.jsonl` oder `batch_jobs.defekt-*.json` noch direkt neben `gemini_batch_ui.py`, verschiebt `prepare_folders()` sie beim Start nach `conf/` bzw. `data/` (Hinweis im Terminal und als Toast). Es wird nie etwas überschrieben: Liegt am Ziel schon eine gleichnamige Datei, bleibt die alte liegen. Durchsucht wird nur der Ordner der App, nie der Arbeitsordner. Tipp: Vor dem ersten Start einer neuen Version `batch_jobs.json` kopieren, denn Ergebnisse sind nach Ablauf der Aufbewahrung bei Google nicht neu abrufbar.
 
 Empfohlene `.gitignore`:
 
 ```text
-credentials.json
-token.json
-batch_jobs*.json
-pdf_files.json
-requests_*.jsonl
+conf/credentials.json
+conf/token.json
+data/
 .streamlit/secrets.toml
 ```
 
-### `batch_jobs.json`: Liste von Einträgen, neueste zuerst
+### `data/batch_jobs.json`: Liste von Einträgen, neueste zuerst
 
 Batch-Eintrag (Felder `state`, `rows`, `error`, `api_model` kommen erst, wenn der Batch einen Endzustand hat):
 
@@ -320,13 +330,13 @@ Eine Zeile in `rows` (beide Modi, erzeugt von `parse_line()`):
 
 Ältere Einträge können Felder nicht haben (`system`, `pdfs`, `think`, `group`, `state`, `rows` …). Neue Felder deshalb **immer optional** lesen (`.get()`).
 
-### `pdf_files.json`
+### `data/pdf_files.json`
 
 ```json
 {"<sha256 des PDF-Inhalts>": "files/<id der Gemini Files API>"}
 ```
 
-### `requests_<unixzeit>.jsonl`
+### `data/requests_<unixzeit>.jsonl`
 
 Eine Zeile pro Prompt, genau das, was an die Batch-API ging (Anfrageformat `GenerateContentRequest`, Feldnamen in snake_case):
 
@@ -339,7 +349,7 @@ Eine Zeile pro Prompt, genau das, was an die Batch-API ging (Anfrageformat `Gene
   "system_instruction": {"parts": [{"text": "…"}]}}}
 ```
 
-Nützlich zur Kontrolle: `grep -o '"thinking_level": "[a-z]*"' requests_*.jsonl | sort | uniq -c`.
+Nützlich zur Kontrolle: `grep -o '"thinking_level": "[a-z]*"' data/requests_*.jsonl | sort | uniq -c`.
 
 ## 8. Architektur
 
@@ -350,9 +360,10 @@ Eine Datei, bewusst ohne Klassen und ohne Datenbank: Funktionen oben, Oberfläch
 | Abschnitt | Inhalt |
 |---|---|
 | Konstanten | siehe 6.2 |
+| Ordner | `_base_dir()` (Wurzel), `prepare_folders()` (legt `conf/` und `data/` an, übernimmt Altbestand) |
 | Verlauf | `runtime()` (prozessweit: `lock`, `threads`, `cancel`), `load_jobs()`, `mutate_jobs(lock, change)` |
 | Google Drive | `drive_service()` (OAuth, Neuanmeldung bei `RefreshError`), `drive_id()` (ID aus Link), `drive_fetch()` (PDF laden/exportieren) |
-| Gemini | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`), `pick()`, `parse_line()`, `parse_results()`, `refresh()` (Status + Ergebnisse laden, Endergebnis sichern), `batch_info()` |
+| Gemini | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`), `pick()`, `parse_line()`, `parse_results()`, `refresh()` (Status + Ergebnisse laden, Endergebnis sichern), `batch_info()` |
 | Synchroner Modus | `ask()` (Retry), `run_sync()` (Thread-Funktion), `start_sync()`, `sync_view()` |
 | Anzeige | `show_rows()`, `sync_panel()`, `job_panel()` (läuft als Fragment) |
 | Verlauf und Formular | `entry_label()`, `reuse_inputs()` (Callback), `delete_entry()` (Callback) |
@@ -364,10 +375,10 @@ Die UI-Grenze ist die Zeile `# ---------- UI ----------`. Alles darüber ist ohn
 
 ```text
 Formular ──► Dateien sammeln (Upload, Drive) ──► Duplikate per SHA-256 entfernen
-         ──► upload_pdf() je PDF: Files API (wiederverwendet über pdf_files.json)
-         ──► start_batch(): JSONL (key + request je Prompt) in requests_<ts>.jsonl,
+         ──► upload_pdf() je PDF: Files API (wiederverwendet über data/pdf_files.json)
+         ──► start_batch(): JSONL (key + request je Prompt) in data/requests_<ts>.jsonl,
              JSONL per Files API hochladen (mime_type "jsonl"), client.batches.create(model, src)
-         ──► Verlaufseintrag (ohne state) in batch_jobs.json
+         ──► Verlaufseintrag (ohne state) in data/batch_jobs.json
 Jobs-Tab ──► Fragment alle 10 s: refresh() → client.batches.get(name)
          ──► bei JOB_STATE_SUCCEEDED: client.files.download(dest.file_name) → parse_results() → rows
          ──► Endzustand (state, rows, error, api_model) in den Eintrag schreiben → ab da kein Abruf mehr nötig
@@ -417,7 +428,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 1. **Erst diese Datei lesen**, dann `gemini_batch_ui.py` von oben nach unten. Kleine, gezielte Änderungen statt Umbauten. Die Datei bleibt eine Datei, bis sie deutlich über etwa 1.000 Zeilen wächst. Dann Logik oberhalb der UI-Grenze in Module auslagern (Importe werden gecacht, nur das Hauptskript läuft bei jedem Rerun neu).
 2. **Prefix stabil halten** (Abschnitt 5). Alles, was vor oder zwischen den PDFs steht, beeinflusst die Cache-Trefferquote.
-3. **Verlauf nur über `mutate_jobs`** schreiben, nie `batch_jobs.json` direkt. Lesen mit `load_jobs()`. Neue Eintragsfelder optional (`.get()`), weil alte Einträge sie nicht haben.
+3. **Verlauf nur über `mutate_jobs`** schreiben, nie `data/batch_jobs.json` direkt. Lesen mit `load_jobs()`. Neue Eintragsfelder optional (`.get()`), weil alte Einträge sie nicht haben.
 4. **Zeilenform nur in `parse_line()` ändern** und dort neue Felder ergänzen. Anzeige in `show_rows()`. Beide Modi nutzen dieselbe Zeilenform, und gespeicherte Zeilen alter Läufe haben neue Felder nicht (`.get()`).
 5. **Lange Arbeit in einen Thread** mit Verlaufseintrag und Polling-Fragment legen (Muster: `start_sync` → `run_sync` → `sync_panel`). Alles im Hauptskript kann durch einen Tab-Wechsel unterbrochen werden.
 6. **Widgets, die per Code gesetzt werden sollen, brauchen einen `key`.** Voreinstellung über `st.session_state.setdefault(key, wert)` setzen und dem Widget kein `value=`/`index=` mitgeben (sonst Streamlit-Warnung). Widget-Zustand nur **vor** dem Erzeugen des Widgets im selben Lauf ändern (in Callbacks oder weiter oben im Skript), danach gibt es eine Ausnahme.
@@ -458,7 +469,9 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 2. **Logik ohne Oberfläche**: alles oberhalb der UI-Grenze ausführen und Funktionen einzeln aufrufen:
 
    ```python
+   import os, tempfile
    from pathlib import Path
+   os.environ["GEMINI_UI_HOME"] = tempfile.mkdtemp()   # sonst entstehen conf/ und data/ im Projektordner
    src = Path("gemini_batch_ui.py").read_text()
    ns = {"__name__": "appmod"}
    exec(src.split("# ---------- UI ----------")[0], ns)
@@ -470,8 +483,8 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
    ```python
    import os, tempfile, time
    from pathlib import Path
-   APP = str(Path("gemini_batch_ui.py").resolve())   # vor dem Wechsel des Arbeitsordners auflösen
-   os.chdir(tempfile.mkdtemp())                 # alle Dateien liegen relativ zum Arbeitsordner
+   APP = str(Path("gemini_batch_ui.py").resolve())
+   os.environ["GEMINI_UI_HOME"] = tempfile.mkdtemp()   # conf/ und data/ landen in einem Wegwerf-Ordner
    os.environ["GEMINI_API_KEY"] = "test"
    import google.genai as g
    from google.genai import types
@@ -504,14 +517,14 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
    assert not at.exception
    ```
 
-   Weitere Hinweise: Widgets per `key` ansprechen (`at.text_area(key="raw")`, `at.number_input(key="group")`, `at.button(key="reuse:<name>")`). Uploads mit `at.file_uploader[0].set_value([(name, bytes, mime)])`. Für Batch braucht der Fake-Client `files.upload/get/download` und `batches.create/get/cancel`. Drive lässt sich ersetzen, indem `googleapiclient.discovery.build` und `google.oauth2.credentials.Credentials.from_authorized_user_file` überschrieben werden (und eine `token.json` im Arbeitsordner liegt).
-4. **Muss jeder Test abdecken**: Start im Batch- und im Synchron-Modus, mehrere PDFs, Gespräche (Fehler im ersten Prompt eines Paares), Abbruch, Öffnen alter Einträge ohne neue Felder, beschädigte `batch_jobs.json`, Abruffehler (HTTP 404 beendet die automatische Prüfung).
+   Weitere Hinweise: Widgets per `key` ansprechen (`at.text_area(key="raw")`, `at.number_input(key="group")`, `at.button(key="reuse:<name>")`). Uploads mit `at.file_uploader[0].set_value([(name, bytes, mime)])`. Für Batch braucht der Fake-Client `files.upload/get/download` und `batches.create/get/cancel`. Drive lässt sich ersetzen, indem `googleapiclient.discovery.build` und `google.oauth2.credentials.Credentials.from_authorized_user_file` überschrieben werden (und eine `token.json` unter `$GEMINI_UI_HOME/conf/` liegt).
+4. **Muss jeder Test abdecken**: Start im Batch- und im Synchron-Modus, mehrere PDFs, Gespräche (Fehler im ersten Prompt eines Paares), Abbruch, Öffnen alter Einträge ohne neue Felder, beschädigte `data/batch_jobs.json`, Übernahme von Altbestand aus dem Hauptordner, Abruffehler (HTTP 404 beendet die automatische Prüfung).
 
 ### 9.4 Checkliste vor der Übergabe
 
 - [ ] `python -m py_compile gemini_batch_ui.py` läuft durch.
 - [ ] Relevante `AppTest`-Szenarien laufen, ohne dass `at.exception` gefüllt ist.
-- [ ] Alte Einträge in `batch_jobs.json` (ohne neue Felder) öffnen weiterhin.
+- [ ] Alte Einträge in `data/batch_jobs.json` (ohne neue Felder) öffnen weiterhin.
 - [ ] Neue Voreinstellungen, Schlüssel und Dateien sind in dieser README eingetragen (Abschnitte 6, 7, 8).
 - [ ] Es wird nicht behauptet, etwas sei mit der echten API geprüft, wenn es nur simuliert lief (Abschnitt 13).
 
@@ -524,7 +537,7 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 | pip-Fehler zu `tensorboard`/`tensorflow` nach Installation | `google-auth-oauthlib` oder `numpy`/`protobuf` wurden hochgezogen, bestehende Pakete verlangen ältere Versionen | Eigene Umgebung benutzen (siehe 3), oder `pip install "google-auth-oauthlib<1.1"`. Kein `-U` in gemeinsamen Umgebungen. |
 | Cache-Token überall 0 | implizites Caching ist nicht garantiert. Im Batch zusätzlich undokumentiert. Die erste synchrone Anfrage hat per Definition 0 | `usage`-JSON einer Antwort ansehen. Synchron testen. PDFs, Reihenfolge und Systemanweisung unverändert lassen. |
 | Drive: „Zugriff blockiert“ | Konto nicht als Test user eingetragen | Cloud Console → Audience → Test users (6.4, Schritt 4) |
-| Drive: `credentials.json fehlt` | OAuth-Client nicht abgelegt | 6.4, Schritt 6 |
+| Drive: `credentials.json fehlt. Lege sie nach …/conf` | OAuth-Client nicht in `conf/` abgelegt | 6.4, Schritt 6 |
 | Drive fragt nach einer Woche erneut nach Anmeldung | „Testing“-Status, Freigabe läuft nach 7 Tagen ab | erwartetes Verhalten, die App meldet sich selbst neu an. Dauerhaft: „Publish app“ oder Workspace „Internal“. |
 | Start bricht ab, Statusfeld verschwindet | Tab während der Vorbereitung gewechselt (löst einen Rerun aus) | Start wiederholen und währenddessen im Tab bleiben. |
 | Synchroner Lauf steht auf „unterbrochen“ | App wurde beendet oder neu gestartet, solange er lief | Bisherige Zeilen sind gespeichert. Mit „Eingaben übernehmen“ neu starten. |
@@ -533,7 +546,8 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 | Synchron nur 32.768 Ausgabe-Token wählbar, Warnung zu google-genai | SDK älter als 2.30.1 | `pip install -U google-genai` (in eigener Umgebung). |
 | Automatische Prüfung läuft auch im Tab „Neue Anfrage“ | Streamlit älter als 1.55, kennt den aktiven Tab nicht | Streamlit aktualisieren. |
 | „Abruf fehlgeschlagen … 404“ bei altem Batch | Batch existiert bei Google nicht mehr (nach Ablauf) und wurde lokal nie gesichert | Nichts zu retten. Eintrag löschen. Neue Batches sichern ihr Ergebnis lokal. |
-| `batch_jobs.defekt-<zahl>.json` taucht auf | `batch_jobs.json` war beschädigt, die App hat sie gesichert und neu begonnen | Sicherung prüfen, ggf. Einträge von Hand zurückkopieren. |
+| `data/batch_jobs.defekt-<zahl>.json` taucht auf | `data/batch_jobs.json` war beschädigt, die App hat sie gesichert und neu begonnen | Sicherung prüfen, ggf. Einträge von Hand zurückkopieren. |
+| Verlauf leer nach dem Wechsel auf `conf/` und `data/` | Alte `batch_jobs.json` lag nicht neben der App, oder `GEMINI_UI_HOME` zeigt woanders hin | Datei von Hand nach `data/` kopieren bzw. `GEMINI_UI_HOME` prüfen. |
 
 ## 11. Bekannte Einschränkungen und Ideen
 
@@ -543,7 +557,7 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 - Synchron läuft **sequenziell**. Parallele Anfragen würden Cache-Treffer am Anfang eher verhindern.
 - Der Start (Dateien laden, hochladen) läuft im Hauptskript. Ein Tab-Wechsel währenddessen bricht ihn ab (im Statusfeld vermerkt).
 - Die Sperre in `runtime()` gilt nur innerhalb **eines** Streamlit-Prozesses. Nicht zwei Instanzen im selben Ordner starten.
-- Der Verlauf wächst ohne Seitenaufteilung. Löschen geht nur einzeln. `requests_*.jsonl` sammeln sich an.
+- Der Verlauf wächst ohne Seitenaufteilung. Löschen geht nur einzeln. `data/requests_*.jsonl` sammeln sich an.
 - Keine Kostenanzeige (Preise ändern sich), keine Streaming-Anzeige, keine Prompt-Bibliothek, kein Zählen der Token vor dem Start.
 - Texte der Oberfläche sind fest auf Deutsch im Code.
 - Drive: nur PDFs und Google-Dokumente (Export als PDF). Liste zeigt höchstens 50 Dateien, weitere per Link oder ID.
@@ -558,14 +572,14 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 - Eingaben des Formulars beim Neustart wiederherstellen.
 - Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Argon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
-- Aufräumen alter `requests_*.jsonl`.
+- Aufräumen alter `data/requests_*.jsonl`.
 
 ## 12. Sicherheit und Datenschutz
 
 - **Daten verlassen den Rechner**: PDFs, Prompts und Ergebnisse gehen an Google (Gemini Files API, Batch-API, Modell). Hochgeladene Dateien liegen dort zeitlich begrenzt (derzeit 48 Stunden), Batch-Ergebnisse 6 Wochen. Das gilt für Inhalte, die diese Weitergabe erlauben.
 - **Drive**: nur Lesezugriff (`drive.readonly`). Die App kann nichts ändern oder löschen.
-- **Geheimnisse**: `credentials.json` und `token.json` nicht weitergeben und nicht einchecken. Der API-Key steht nur im Browserfeld oder in der Umgebungsvariable.
-- **Lokale Daten**: `batch_jobs.json` und `requests_*.jsonl` enthalten Prompts und Antworten im Klartext. Ordner entsprechend schützen (`.gitignore`, Dateirechte).
+- **Geheimnisse**: `conf/` (vor allem `credentials.json` und `token.json`) nicht weitergeben und nicht einchecken. Der API-Key steht nur im Browserfeld oder in der Umgebungsvariable.
+- **Lokale Daten**: `data/` (z. B. `batch_jobs.json`, `requests_*.jsonl`) enthält Prompts und Antworten im Klartext. Ordner entsprechend schützen (`.gitignore`, Dateirechte).
 - Die App ist für **einen Benutzer auf dem eigenen Rechner** gedacht, ohne Anmeldung. Streamlit lauscht standardmäßig auch im lokalen Netz (die Startmeldung nennt eine „Network URL“), dann könnte jeder im Netz die App samt API-Key-Feld bedienen. Wer das nicht möchte, startet mit `streamlit run gemini_batch_ui.py --server.address localhost`. Nicht ungeschützt im Internet betreiben.
 
 ## 13. Verifikationsstand und Quellen
@@ -573,7 +587,7 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
 - Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
-- **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung.
+- **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur `conf/`/`data/` samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
 
 **Quellen** (Stand Oktober 2026, bitte auf Änderungen prüfen)

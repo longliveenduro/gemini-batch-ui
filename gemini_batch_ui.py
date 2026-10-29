@@ -4,10 +4,11 @@ Start:    pip install -r requirements.txt && streamlit run gemini_batch_ui.py
 API-Key:  Umgebungsvariable GEMINI_API_KEY oder Seitenleiste.
 Modi:     Batch (asynchron, 50 % Rabatt) oder Synchron (nacheinander, impliziter Cache über alle Prompts,
           optional in Gesprächen: je N Prompts bilden einen gemeinsamen Kontext, das nächste Gespräch beginnt neu).
-Dateien:  batch_jobs.json (Verlauf und Ergebnisse), pdf_files.json (hochgeladene PDFs), requests_*.jsonl
-          (gesendete Batch-Anfragen), token.json und credentials.json (Drive-Zugang, nicht weitergeben).
+Ordner:   conf/ (Zugangsdaten, geheim: credentials.json, token.json) und data/ (batch_jobs.json = Verlauf und
+          Ergebnisse, pdf_files.json = hochgeladene PDFs, requests_*.jsonl = gesendete Batch-Anfragen).
+          Beide liegen neben dieser Datei, oder unter dem Ordner aus der Umgebungsvariable GEMINI_UI_HOME.
 Drive:    (optional) In der Google Cloud Console die Drive API aktivieren, eine OAuth-Client-ID
-          vom Typ „Desktop-App“ erstellen und als credentials.json neben dieses Skript legen.
+          vom Typ „Desktop-App“ erstellen und als conf/credentials.json ablegen.
           Beim ersten Zugriff öffnet sich der Browser zur Freigabe (nur Lesezugriff).
 """
 import hashlib
@@ -15,6 +16,7 @@ import io
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -26,9 +28,26 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
+
+def _base_dir():
+    """Ordner, unter dem conf/ und data/ liegen: GEMINI_UI_HOME, sonst der Ordner dieser Datei."""
+    home = os.getenv("GEMINI_UI_HOME")
+    if home:
+        return Path(home).expanduser().resolve()
+    try:
+        return Path(__file__).resolve().parent
+    except NameError:  # z. B. bei exec() in Tests
+        return Path.cwd()
+
+
+BASE = _base_dir()
+CONF_DIR = BASE / "conf"  # Konfiguration und Zugangsdaten (geheim)
+DATA_DIR = BASE / "data"  # erzeugte Daten: Verlauf, PDF-Zuordnung, gesendete Batch-Anfragen
+CREDENTIALS_FILE = CONF_DIR / "credentials.json"
+TOKEN_FILE = CONF_DIR / "token.json"
+HISTORY = DATA_DIR / "batch_jobs.json"
+FILES_DB = DATA_DIR / "pdf_files.json"  # PDF-Hash -> Name der Datei in der Gemini Files API
 DEFAULT_MODEL = "gemini-4-argon"
-HISTORY = Path("batch_jobs.json")
-FILES_DB = Path("pdf_files.json")  # PDF-Hash -> Name der Datei in der Gemini Files API
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 POLL_SECONDS = 10  # Abstand der automatischen Prüfung im Tab „Jobs und Ergebnisse“
 DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"}
@@ -65,11 +84,29 @@ def load_jobs():
 def mutate_jobs(lock, change):
     """Verlauf unter Sperre lesen, mit change(jobs) ändern und atomar zurückschreiben (auch aus Threads nutzbar)."""
     with lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
         jobs = load_jobs()
         change(jobs)
         tmp = HISTORY.with_suffix(".tmp")
         tmp.write_text(json.dumps(jobs, ensure_ascii=False, indent=1), "utf-8")
         os.replace(tmp, HISTORY)
+
+
+# ---------- Ordner conf/ und data/ ----------
+def prepare_folders():
+    """conf/ und data/ anlegen und Dateien aus dem Hauptordner (älterer Stand) dorthin verschieben, sofern am Ziel
+    noch nichts liegt. Gibt die verschobenen Dateien als Text zurück."""
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    legacy = [(BASE / n, CONF_DIR) for n in ("credentials.json", "token.json")]
+    legacy += [(BASE / n, DATA_DIR) for n in ("batch_jobs.json", "pdf_files.json")]
+    legacy += [(f, DATA_DIR) for pattern in ("requests_*.jsonl", "batch_jobs.defekt-*.json") for f in BASE.glob(pattern)]
+    moved = []
+    for src, folder in legacy:
+        if src.is_file() and not (folder / src.name).exists():
+            shutil.move(str(src), str(folder / src.name))
+            moved.append(f"{src.name} nach {folder.name}/")
+    return moved
 
 
 # ---------- Google Drive ----------
@@ -81,18 +118,19 @@ def drive_service():
     from googleapiclient.discovery import build
 
     creds = None
-    if Path("token.json").exists():
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
     if not creds or not creds.valid:
         try:
             if not (creds and creds.expired and creds.refresh_token):
                 raise RefreshError("kein gültiger Login")
             creds.refresh(Request())
         except RefreshError:  # keine, abgelaufene oder widerrufene Freigabe (z. B. nach 7 Tagen im Testmodus)
-            if not Path("credentials.json").exists():
-                raise FileNotFoundError("credentials.json fehlt (Anleitung oben im Skript).")
-            creds = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES).run_local_server(port=0)
-        Path("token.json").write_text(creds.to_json())
+            if not CREDENTIALS_FILE.exists():
+                raise FileNotFoundError(f"credentials.json fehlt. Lege sie nach {CONF_DIR} (Anleitung oben im Skript).")
+            creds = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES).run_local_server(port=0)
+        CONF_DIR.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(creds.to_json())
     return build("drive", "v3", credentials=creds)
 
 
@@ -142,6 +180,7 @@ def upload_pdf(client, name, data):
     if f.state and f.state.name != "ACTIVE":
         raise RuntimeError(f"Gemini konnte das PDF nicht verarbeiten (Status {f.state.name}).")
     db[key] = f.name
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     FILES_DB.write_text(json.dumps(db), "utf-8")
     return f
 
@@ -160,7 +199,8 @@ def start_batch(client, model, pdfs, prompts, system, think, max_out, label):
         if system:
             req["system_instruction"] = {"parts": [{"text": system}]}
         lines.append(json.dumps({"key": key, "request": req}, ensure_ascii=False))
-    path = Path(f"requests_{int(time.time())}.jsonl")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = DATA_DIR / f"requests_{int(time.time())}.jsonl"
     path.write_text("\n".join(lines), "utf-8")
     jf = client.files.upload(file=str(path), config=types.UploadFileConfig(display_name=label, mime_type="jsonl"))
     job = client.batches.create(model=model, src=jf.name, config={"display_name": label})
@@ -420,7 +460,7 @@ def job_panel(client, rt, j, polling):
     if not info:
         return
     if "res:" + name not in st.session_state:
-        st.caption("Gesichertes Endergebnis aus batch_jobs.json, kein Abruf bei Google nötig.")
+        st.caption("Gesichertes Endergebnis aus data/batch_jobs.json, kein Abruf bei Google nötig.")
     st.write(f"Status: **{info['state']}**, Modell laut API: **{info.get('model') or 'unbekannt'}**")
     if info["error"]:
         st.error(info["error"])
@@ -464,6 +504,10 @@ def delete_entry(name):
 
 
 # ---------- UI ----------
+moved = prepare_folders()
+if moved:
+    print("Dateien einsortiert:", ", ".join(moved))
+    st.toast("Dateien einsortiert: " + ", ".join(moved))
 with st.sidebar:
     api_key = st.text_input("Gemini API-Key", os.getenv("GEMINI_API_KEY", ""), type="password")
     model = st.text_input("Modell", DEFAULT_MODEL)
@@ -496,7 +540,7 @@ with tab_new:
                 ).execute()
                 st.session_state["drive_pdfs"] = {f"{f['name']} [{f['id'][:6]}]": f["id"] for f in res["files"]}
             except Exception as e:
-                st.error(f"Drive-Zugriff fehlgeschlagen: {e}. Bei abgelaufenem Login token.json löschen.")
+                st.error(f"Drive-Zugriff fehlgeschlagen: {e}. Falls der Login hängt, conf/token.json löschen.")
         drive_list = st.session_state.get("drive_pdfs", {})
         chosen = st.multiselect("Zuletzt geänderte PDFs", list(drive_list), placeholder="PDFs auswählen") if drive_list else []
         links = st.text_area("Oder Drive-Links / Datei-IDs einfügen (eine pro Zeile)", height=80)
