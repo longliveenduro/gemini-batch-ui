@@ -70,6 +70,8 @@ conda activate gemini-batch
 pip install -r requirements.txt
 ```
 
+Für die Tests zusätzlich `pip install -r requirements-dev.txt` (Abschnitt 9.3).
+
 `requirements.txt`:
 
 ```text
@@ -85,10 +87,10 @@ Kein `pip install -U -r ...` in einer gemeinsam genutzten Umgebung (z. B. Anacon
 
 ```bash
 export GEMINI_API_KEY="dein-key"      # optional, sonst in der Seitenleiste eintragen
-streamlit run gemini_batch_ui.py      # öffnet http://localhost:8501
+streamlit run src/gemini_batch_ui.py  # im Projektordner ausführen, öffnet http://localhost:8501
 ```
 
-Anderer Port: `streamlit run gemini_batch_ui.py --server.port 8502`. Beenden mit Strg+C. Laufende synchrone Läufe brechen dann ab und erscheinen später als „unterbrochen“. Beim ersten Start legt die App die Ordner `conf/` und `data/` neben `gemini_batch_ui.py` an (Abschnitt 7).
+Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden mit Strg+C. Laufende synchrone Läufe brechen dann ab und erscheinen später als „unterbrochen“. Beim ersten Start legt die App die Ordner `conf/` und `data/` im Projektordner neben `src/` an (Abschnitt 7).
 
 **Erster Lauf in 60 Sekunden**
 
@@ -170,14 +172,14 @@ Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token
 
 - Seitenleiste „Gemini API-Key“ (Passwortfeld) oder Umgebungsvariable `GEMINI_API_KEY` (wird als Vorbelegung genutzt). Der Key wird nicht gespeichert.
 - Seitenleiste „Modell“, Voreinstellung `gemini-4-argon`. Andere Modelle sind möglich, aber die App ist auf Argon zugeschnitten (Batch-Limit, `thinking_level`-Werte, Caching-Annahmen).
-- Optional die Umgebungsvariable `GEMINI_UI_HOME`: Ordner, unter dem `conf/` und `data/` liegen. Voreinstellung ist der Ordner von `gemini_batch_ui.py`, unabhängig vom Arbeitsordner. Nützlich für getrennte Datenbestände und für Tests.
+- Optional die Umgebungsvariable `GEMINI_UI_HOME`: Ordner, unter dem `conf/` und `data/` liegen. Voreinstellung ist der Projektordner (der Ordner über `src/`), unabhängig vom Arbeitsordner. Nützlich für getrennte Datenbestände und für Tests.
 
-### 6.2 Konstanten im Code (Kopf von `gemini_batch_ui.py`)
+### 6.2 Konstanten im Code (Kopf von `src/gemini_batch_ui.py`)
 
 | Konstante | Wert | Bedeutung |
 |---|---|---|
 | `DEFAULT_MODEL` | `gemini-4-argon` | Voreinstellung Modell |
-| `BASE` | Ordner von `gemini_batch_ui.py`, oder `GEMINI_UI_HOME` | Wurzel für `conf/` und `data/` (`_base_dir()`) |
+| `BASE` | Projektordner: Ordner über `src/` (liegt die Datei in keinem Ordner namens `src`, ihr eigener Ordner), oder `GEMINI_UI_HOME` | Wurzel für `conf/` und `data/` (`_base_dir()`) |
 | `CONF_DIR` | `BASE/conf` | Zugangsdaten, geheim |
 | `DATA_DIR` | `BASE/data` | erzeugte Daten |
 | `CREDENTIALS_FILE`, `TOKEN_FILE` | `conf/credentials.json`, `conf/token.json` | Drive-OAuth-Client und Drive-Login |
@@ -205,7 +207,7 @@ fileWatcherType = "none"   # vermeidet „inotify watch limit reached“ unter L
 maxUploadSize = 500        # MB pro hochgeladener Datei (Standard 200)
 ```
 
-Streamlit liest diese Datei aus `.streamlit/` im **Arbeitsordner**, in dem `streamlit run` gestartet wird, nicht aus `conf/`. Am besten startet man die App im Projektordner.
+Streamlit liest diese Datei aus `.streamlit/` im **Arbeitsordner**, in dem `streamlit run` gestartet wird, nicht aus `conf/`. Am besten startet man die App im Projektordner (dann passt auch der Pfad `src/gemini_batch_ui.py`).
 
 ### 6.4 Google Drive einrichten (optional)
 
@@ -216,7 +218,7 @@ Nur nötig für „PDFs aus Google Drive hinzufügen“. Der Datei-Upload funkti
 3. **Google Auth Platform** (Menü) → „Get started“: App-Name, Support-E-Mail, Zielgruppe „External“ (mit Workspace-Konto „Internal“), Kontakt-E-Mail, Richtlinie akzeptieren.
 4. Nur bei „External“: unter „Audience“ die eigene Google-Adresse als **Test user** eintragen (sonst „Zugriff blockiert“).
 5. Unter „Data Access“ den Scope `https://www.googleapis.com/auth/drive.readonly` hinzufügen.
-6. Unter „Clients“ → „Create client“ → Anwendungstyp **Desktop-App** → JSON herunterladen und als `conf/credentials.json` ablegen (der Ordner `conf/` liegt neben `gemini_batch_ui.py` und wird beim Start angelegt).
+6. Unter „Clients“ → „Create client“ → Anwendungstyp **Desktop-App** → JSON herunterladen und als `conf/credentials.json` ablegen (der Ordner `conf/` liegt im Projektordner neben `src/` und wird beim Start angelegt).
 7. In der App „Meine PDFs aus Drive laden“. Beim ersten Zugriff öffnet sich der Browser zur Freigabe (Warnung „Google hat diese App nicht überprüft“ über „Erweitert“ bestätigen). Danach liegt `conf/token.json` vor.
 
 Hinweise:
@@ -232,16 +234,21 @@ Hinweise:
 | `streamlit` | 1.55 | Oberfläche. Ab 1.55 kennt `st.tabs` den aktiven Tab (`key`, `on_change`, `.open`). Mit älteren Versionen läuft die App, prüft dann aber auch im anderen Tab. |
 | `google-genai` | 2.30.1 | Gemini-SDK. Ab 2.30.1 setzt `generate_content` Long Decode automatisch fort. Ältere Version: synchron auf 32.768 Ausgabe-Token begrenzt (die App warnt). |
 | `google-api-python-client`, `google-auth-oauthlib` | beliebig | Drive-Zugriff (werden erst bei Drive-Nutzung importiert) |
+| `pytest` | 8 | nur für die Tests (`requirements-dev.txt`) |
 
 ## 7. Lokale Dateien und Datenformate
 
-Die App legt `conf/` (Konfiguration und Zugangsdaten) und `data/` (erzeugte Daten) **neben `gemini_batch_ui.py`** an, unabhängig vom Arbeitsordner. Mit der Umgebungsvariable `GEMINI_UI_HOME` lässt sich ein anderer Ordner festlegen, unter dem beide liegen.
+Die App legt `conf/` (Konfiguration und Zugangsdaten) und `data/` (erzeugte Daten) im **Projektordner** an, neben `src/` und unabhängig vom Arbeitsordner. Projektordner ist der Ordner über `src/`. Mit der Umgebungsvariable `GEMINI_UI_HOME` lässt sich ein anderer Ordner festlegen, unter dem beide liegen.
 
 ```text
-gemini-4-batch/
-├── gemini_batch_ui.py              # die gesamte App (eine Datei, bewusst)
-├── requirements.txt
+gemini-4-batch/                     # Projektordner
 ├── README.md
+├── requirements.txt
+├── requirements-dev.txt            # zusätzlich pytest, nur für die Tests
+├── pytest.ini                      # pytest-Einstellungen
+├── src/
+│   └── gemini_batch_ui.py          # die gesamte App (eine Datei, bewusst)
+├── tests/                          # automatisierte Tests (Abschnitt 9.3)
 ├── .streamlit/config.toml          # optional, Streamlit-Einstellungen (aus dem Arbeitsordner gelesen)
 ├── conf/                           # Konfiguration und Zugangsdaten, GEHEIM
 │   ├── credentials.json            # optional: Drive-OAuth-Client (von Hand hineinlegen)
@@ -253,7 +260,9 @@ gemini-4-batch/
     └── requests_<unixzeit>.jsonl   # je Batch die exakt gesendeten Anfragen
 ```
 
-**Übernahme älterer Stände.** Lagen `credentials.json`, `token.json`, `batch_jobs.json`, `pdf_files.json`, `requests_*.jsonl` oder `batch_jobs.defekt-*.json` noch direkt neben `gemini_batch_ui.py`, verschiebt `prepare_folders()` sie beim Start nach `conf/` bzw. `data/` (Hinweis im Terminal und als Toast). Es wird nie etwas überschrieben: Liegt am Ziel schon eine gleichnamige Datei, bleibt die alte liegen. Durchsucht wird nur der Ordner der App, nie der Arbeitsordner. Tipp: Vor dem ersten Start einer neuen Version `batch_jobs.json` kopieren, denn Ergebnisse sind nach Ablauf der Aufbewahrung bei Google nicht neu abrufbar.
+**Lage der App-Datei.** `README.md`, `requirements*.txt` und `pytest.ini` bleiben im Projektordner, weil Werkzeuge sie dort erwarten. Liegt `gemini_batch_ui.py` noch direkt im Projektordner (älterer Stand), läuft die App ebenfalls: `conf/` und `data/` entstehen dann im Ordner der Datei und damit an derselben Stelle. Für bestehende Installationen genügt es, die Datei nach `src/` zu verschieben. `conf/` und `data/` bleiben unverändert, nur der Startbefehl ändert sich zu `streamlit run src/gemini_batch_ui.py`.
+
+**Übernahme älterer Stände.** Lagen `credentials.json`, `token.json`, `batch_jobs.json`, `pdf_files.json`, `requests_*.jsonl` oder `batch_jobs.defekt-*.json` noch direkt im Projektordner (statt in `conf/` bzw. `data/`), verschiebt `prepare_folders()` sie beim Start dorthin (Hinweis im Terminal und als Toast). Es wird nie etwas überschrieben: Liegt am Ziel schon eine gleichnamige Datei, bleibt die alte liegen. Durchsucht wird nur der Projektordner, nie der Arbeitsordner. Tipp: Vor dem ersten Start einer neuen Version `batch_jobs.json` kopieren, denn Ergebnisse sind nach Ablauf der Aufbewahrung bei Google nicht neu abrufbar.
 
 Empfohlene `.gitignore`:
 
@@ -262,6 +271,8 @@ conf/credentials.json
 conf/token.json
 data/
 .streamlit/secrets.toml
+__pycache__/
+.pytest_cache/
 ```
 
 ### `data/batch_jobs.json`: Liste von Einträgen, neueste zuerst
@@ -355,7 +366,7 @@ Nützlich zur Kontrolle: `grep -o '"thinking_level": "[a-z]*"' data/requests_*.j
 
 Eine Datei, bewusst ohne Klassen und ohne Datenbank: Funktionen oben, Oberfläche unten. Streamlit führt das Skript bei **jeder** Interaktion von oben nach unten neu aus. Alles, was länger leben muss, steckt deshalb in Dateien, in `st.session_state` oder in `runtime()`.
 
-### Landkarte von `gemini_batch_ui.py` (von oben nach unten)
+### Landkarte von `src/gemini_batch_ui.py` (von oben nach unten)
 
 | Abschnitt | Inhalt |
 |---|---|
@@ -369,7 +380,7 @@ Eine Datei, bewusst ohne Klassen und ohne Datenbank: Funktionen oben, Oberfläch
 | Verlauf und Formular | `entry_label()`, `reuse_inputs()` (Callback), `delete_entry()` (Callback) |
 | UI | Seitenleiste, Tabs, `with tab_new:` (Formular + Start-Handler), `with tab_jobs:` (Auswahl, Buttons, Fragment) |
 
-Die UI-Grenze ist die Zeile `# ---------- UI ----------`. Alles darüber ist ohne Oberfläche testbar (siehe 9.3).
+Die UI-Grenze ist die Zeile `# ---------- UI ----------`. Alles darüber ist ohne Oberfläche testbar (siehe 9.3). Die Fixture `app` in `tests/conftest.py` lädt genau diesen Teil.
 
 ### Datenfluss Batch
 
@@ -426,7 +437,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 ### 9.1 Spielregeln
 
-1. **Erst diese Datei lesen**, dann `gemini_batch_ui.py` von oben nach unten. Kleine, gezielte Änderungen statt Umbauten. Die Datei bleibt eine Datei, bis sie deutlich über etwa 1.000 Zeilen wächst. Dann Logik oberhalb der UI-Grenze in Module auslagern (Importe werden gecacht, nur das Hauptskript läuft bei jedem Rerun neu).
+1. **Erst diese Datei lesen**, dann `src/gemini_batch_ui.py` von oben nach unten. Kleine, gezielte Änderungen statt Umbauten. Die Datei bleibt eine Datei, bis sie deutlich über etwa 1.000 Zeilen wächst. Dann Logik oberhalb der UI-Grenze in Module auslagern (Importe werden gecacht, nur das Hauptskript läuft bei jedem Rerun neu).
 2. **Prefix stabil halten** (Abschnitt 5). Alles, was vor oder zwischen den PDFs steht, beeinflusst die Cache-Trefferquote.
 3. **Verlauf nur über `mutate_jobs`** schreiben, nie `data/batch_jobs.json` direkt. Lesen mit `load_jobs()`. Neue Eintragsfelder optional (`.get()`), weil alte Einträge sie nicht haben.
 4. **Zeilenform nur in `parse_line()` ändern** und dort neue Felder ergänzen. Anzeige in `show_rows()`. Beide Modi nutzen dieselbe Zeilenform, und gespeicherte Zeilen alter Läufe haben neue Felder nicht (`.get()`).
@@ -461,71 +472,73 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 **Weitere Ideen** stehen in Abschnitt 11.
 
-### 9.3 Testen ohne echte API
+### 9.3 Automatisierte Tests
 
-Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt keine echte Testsuite im Repository. Vorgehen, das sich bewährt hat:
+Die Testsuite liegt in `tests/` und braucht weder Internet noch API-Key. Alle Google-Dienste sind durch Ersatzobjekte ersetzt (`tests/fakes.py`), und jeder Test läuft in einem Wegwerf-Ordner (`GEMINI_UI_HOME`).
 
-1. **Syntax**: `python -m py_compile gemini_batch_ui.py`.
-2. **Logik ohne Oberfläche**: alles oberhalb der UI-Grenze ausführen und Funktionen einzeln aufrufen:
+**Ausführen**
 
-   ```python
-   import os, tempfile
-   from pathlib import Path
-   os.environ["GEMINI_UI_HOME"] = tempfile.mkdtemp()   # sonst entstehen conf/ und data/ im Projektordner
-   src = Path("gemini_batch_ui.py").read_text()
-   ns = {"__name__": "appmod"}
-   exec(src.split("# ---------- UI ----------")[0], ns)
-   # ns["parse_line"], ns["start_batch"], ns["run_sync"] … mit Fake-Clients aufrufen
-   ```
+```bash
+pip install -r requirements-dev.txt        # installiert zusätzlich pytest
+pytest                                     # alle Tests (rund 120, etwa 20 Sekunden)
+pytest -m "not ui"                         # nur die schnellen Tests ohne Oberfläche (unter 2 Sekunden)
+pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnitt
+```
 
-3. **Oberfläche mit Streamlits `AppTest`** und einem Fake-Client:
+**Aufbau**
 
-   ```python
-   import os, tempfile, time
-   from pathlib import Path
-   APP = str(Path("gemini_batch_ui.py").resolve())
-   os.environ["GEMINI_UI_HOME"] = tempfile.mkdtemp()   # conf/ und data/ landen in einem Wegwerf-Ordner
-   os.environ["GEMINI_API_KEY"] = "test"
-   import google.genai as g
-   from google.genai import types
-   from streamlit.testing.v1 import AppTest
+| Datei | Inhalt |
+|---|---|
+| `pytest.ini` | Einstellungen, Marker `ui` für die langsameren Oberflächentests |
+| `tests/conftest.py` | Fixtures: `home` (Wegwerf-Ordner als `GEMINI_UI_HOME`, Dummy-Key), `app` (die App ohne Oberfläche als Objekt), `rt` (Ersatz für `runtime()`), `fake_time` (keine echten Pausen). Dazu eine Sperre gegen echte API-Zugriffe und ein Sicherheitsnetz: ändert ein Test `conf/` oder `data/` im Projektordner, schlägt der Lauf am Ende fehl |
+| `tests/fakes.py` | `FakeGemini` (Files API, Batch-API, `generate_content`, zeichnet Aufrufe auf), `make_response`, `ApiError`, `FakeDrive`, `install`, `install_drive` |
+| `tests/helpers.py` | `wait_until`, `wait_for_run_end`, Verlauf lesen und schreiben, Eintrags-Vorlagen (`batch_entry`, `sync_entry`, `finished_batch`, `row`), AppTest-Kürzel (`new_app`, `click`, `set_prompts`, `captions`, `markdown`) |
+| `tests/test_logic.py` | reine Logik: Parser, Hilfsfunktionen, Ordner und Altbestand, Verlaufsdatei, PDF-Upload, Batch-Anfragen, Wiederholungen |
+| `tests/test_sync_worker.py` | synchroner Modus: Anfrageaufbau, Gespräche, Fehlerfälle, Abbruch, Zustände |
+| `tests/test_drive.py` | Drive-Anmeldung (Token, Neuanmeldung, Netzwerkfehler) und Laden von Dateien |
+| `tests/test_ui.py` | Oberfläche mit AppTest: Formular, Starts, Jobs-Tab, automatische Prüfung, Übernehmen, Löschen, Altbestand, Ordnerlage (Marker `ui`) |
+| `tests/test_docs.py` | gleicht README und Code ab: genannte Funktionen, Konstanten, Schlüssel, Versionen, Testdateien |
 
-   class FakeModels:
-       def generate_content(self, model, contents, config):
-           return types.GenerateContentResponse(
-               candidates=[types.Candidate(content=types.Content(role="model", parts=[types.Part(text="Antwort")]),
-                                           finish_reason="STOP")],
-               usage_metadata=types.GenerateContentResponseUsageMetadata(
-                   prompt_token_count=100, cached_content_token_count=0, candidates_token_count=5, thoughts_token_count=5),
-               model_version="gemini-4-argon")
+**Wie getestet wird**
 
-   class FakeClient:
-       def __init__(self, api_key=None): self.models = FakeModels()
+- Der Code oberhalb von `# ---------- UI ----------` wird per `exec` geladen und als `app` bereitgestellt (`app.parse_line(...)`). Streamlit-Aufrufe darin laufen im „bare mode“, das ist gewollt.
+- Die Oberfläche läuft in Streamlits `AppTest` (`new_app()`): Widgets per `key` ansprechen, Tabs über `at.session_state["view"]` wechseln, Uploads mit `at.file_uploader[0].set_value([(name, bytes, mime)])`.
+- Dienste ersetzt man mit `FakeGemini(...)` (Logiktests) bzw. `use_fake(...)` (Oberflächentests). Das Argument `script` bestimmt die Antworten von `generate_content` der Reihe nach: `"ok"`, `"empty"`, ein `dict` für `make_response`, oder eine Exception, die ausgelöst wird.
+- Drive ersetzt `install_drive(...)`: Anmeldung und Dienst sind Fakes, `token.json` liegt dann in `conf/` des Wegwerf-Ordners.
 
-   g.Client = FakeClient                         # vor at.run() ersetzen
+**Ein neuer Test**
 
-   at = AppTest.from_file(APP, default_timeout=30)
-   at.run()
-   at.radio(key="mode").set_value("Synchron (nacheinander, Cache-Treffer möglich)")
-   at.text_area(key="raw").set_value("Frage 1\n---\nFrage 2")
-   at.run()
-   [b for b in at.button if b.label == "Synchron starten"][0].click()
-   at.run()
-   time.sleep(1)                                 # Hintergrund-Thread abwarten
-   at.session_state["view"] = "Jobs und Ergebnisse"   # Tab wechseln
-   at.run()
-   assert not at.exception
-   ```
+```python
+from fakes import FakeGemini, install
+from helpers import MODE_SYNC, click, new_app, set_prompts, wait_for_run_end
 
-   Weitere Hinweise: Widgets per `key` ansprechen (`at.text_area(key="raw")`, `at.number_input(key="group")`, `at.button(key="reuse:<name>")`). Uploads mit `at.file_uploader[0].set_value([(name, bytes, mime)])`. Für Batch braucht der Fake-Client `files.upload/get/download` und `batches.create/get/cancel`. Drive lässt sich ersetzen, indem `googleapiclient.discovery.build` und `google.oauth2.credentials.Credentials.from_authorized_user_file` überschrieben werden (und eine `token.json` unter `$GEMINI_UI_HOME/conf/` liegt).
-4. **Muss jeder Test abdecken**: Start im Batch- und im Synchron-Modus, mehrere PDFs, Gespräche (Fehler im ersten Prompt eines Paares), Abbruch, Öffnen alter Einträge ohne neue Felder, beschädigte `data/batch_jobs.json`, Übernahme von Altbestand aus dem Hauptordner, Abruffehler (HTTP 404 beendet die automatische Prüfung).
+
+def test_beispiel(monkeypatch, home):
+    install(monkeypatch, FakeGemini([{"text": "Hallo", "cached": 500}]))
+    at = new_app()
+    at.run()
+    at.radio(key="mode").set_value(MODE_SYNC)
+    at.run()
+    set_prompts(at, "Frage")
+    click(at, "Synchron starten")
+    assert wait_for_run_end(home)["rows"][0]["cached"] == 500
+```
+
+**Regeln für Tests**
+
+1. Keine echten Dienste und kein Netzwerk. Wer den Fake-Client vergisst, bekommt sofort einen Fehler (automatische Fixture).
+2. Nie im Projektordner schreiben, immer die Fixture `home` nutzen.
+3. Pausen über `fake_time` überspringen, Hintergrund-Threads mit `wait_until` oder `wait_for_run_end` abwarten, nie mit festem `sleep`.
+4. Neue Funktion: Test in `test_logic.py` oder `test_sync_worker.py`. Neue Oberflächenfunktion: ein `ui`-Test. Neue Datei, Konstante, Schlüssel oder Funktion, die die README nennt: README anpassen, sonst schlägt `test_docs.py` an.
+5. Ältere Einträge ohne neue Felder müssen offen bleiben. `test_entries_from_older_versions_still_open` ist das Muster dafür.
+
+**Grenze der Tests.** Sie zeigen, dass die App mit Antworten in der Form des echten SDK richtig umgeht. Sie beweisen nicht, dass Google so antwortet wie `FakeGemini` (Caching, Limits, Fehlertexte). Das bleibt beim ersten echten Einsatz zu beobachten (Abschnitt 13).
 
 ### 9.4 Checkliste vor der Übergabe
 
-- [ ] `python -m py_compile gemini_batch_ui.py` läuft durch.
-- [ ] Relevante `AppTest`-Szenarien laufen, ohne dass `at.exception` gefüllt ist.
-- [ ] Alte Einträge in `data/batch_jobs.json` (ohne neue Felder) öffnen weiterhin.
-- [ ] Neue Voreinstellungen, Schlüssel und Dateien sind in dieser README eingetragen (Abschnitte 6, 7, 8).
+- [ ] `pytest` läuft durch (bei reinen Logikänderungen genügt vorab `pytest -m "not ui"`).
+- [ ] Neue Funktionen, Anzeigen und Abläufe haben einen Test (9.3), Fehlerfälle und ältere Einträge ohne neue Felder sind abgedeckt.
+- [ ] Neue Voreinstellungen, Schlüssel, Funktionen und Dateien stehen in dieser README (Abschnitte 6, 7, 8). `tests/test_docs.py` prüft die wichtigsten Verweise.
 - [ ] Es wird nicht behauptet, etwas sei mit der echten API geprüft, wenn es nur simuliert lief (Abschnitt 13).
 
 ## 10. Fehlersuche
@@ -547,7 +560,7 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 | Automatische Prüfung läuft auch im Tab „Neue Anfrage“ | Streamlit älter als 1.55, kennt den aktiven Tab nicht | Streamlit aktualisieren. |
 | „Abruf fehlgeschlagen … 404“ bei altem Batch | Batch existiert bei Google nicht mehr (nach Ablauf) und wurde lokal nie gesichert | Nichts zu retten. Eintrag löschen. Neue Batches sichern ihr Ergebnis lokal. |
 | `data/batch_jobs.defekt-<zahl>.json` taucht auf | `data/batch_jobs.json` war beschädigt, die App hat sie gesichert und neu begonnen | Sicherung prüfen, ggf. Einträge von Hand zurückkopieren. |
-| Verlauf leer nach dem Wechsel auf `conf/` und `data/` | Alte `batch_jobs.json` lag nicht neben der App, oder `GEMINI_UI_HOME` zeigt woanders hin | Datei von Hand nach `data/` kopieren bzw. `GEMINI_UI_HOME` prüfen. |
+| Verlauf leer nach dem Wechsel auf `conf/` und `data/` | Alte `batch_jobs.json` lag nicht im Projektordner, oder `GEMINI_UI_HOME` zeigt woanders hin | Datei von Hand nach `data/` kopieren bzw. `GEMINI_UI_HOME` prüfen. |
 
 ## 11. Bekannte Einschränkungen und Ideen
 
@@ -573,6 +586,8 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 - Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Argon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
 - Aufräumen alter `data/requests_*.jsonl`.
+- Ein CI-Workflow (z. B. GitHub Actions), der `pytest` bei jedem Push ausführt.
+- Wenige, bewusst kostenpflichtige „Live“-Tests gegen die echte API (eigener Marker, standardmäßig übersprungen), die Annahmen aus Abschnitt 5 prüfen.
 
 ## 12. Sicherheit und Datenschutz
 
@@ -580,14 +595,15 @@ Die App wurde bisher überwiegend mit simulierten Diensten getestet, es gibt kei
 - **Drive**: nur Lesezugriff (`drive.readonly`). Die App kann nichts ändern oder löschen.
 - **Geheimnisse**: `conf/` (vor allem `credentials.json` und `token.json`) nicht weitergeben und nicht einchecken. Der API-Key steht nur im Browserfeld oder in der Umgebungsvariable.
 - **Lokale Daten**: `data/` (z. B. `batch_jobs.json`, `requests_*.jsonl`) enthält Prompts und Antworten im Klartext. Ordner entsprechend schützen (`.gitignore`, Dateirechte).
-- Die App ist für **einen Benutzer auf dem eigenen Rechner** gedacht, ohne Anmeldung. Streamlit lauscht standardmäßig auch im lokalen Netz (die Startmeldung nennt eine „Network URL“), dann könnte jeder im Netz die App samt API-Key-Feld bedienen. Wer das nicht möchte, startet mit `streamlit run gemini_batch_ui.py --server.address localhost`. Nicht ungeschützt im Internet betreiben.
+- Die App ist für **einen Benutzer auf dem eigenen Rechner** gedacht, ohne Anmeldung. Streamlit lauscht standardmäßig auch im lokalen Netz (die Startmeldung nennt eine „Network URL“), dann könnte jeder im Netz die App samt API-Key-Feld bedienen. Wer das nicht möchte, startet mit `streamlit run src/gemini_batch_ui.py --server.address localhost`. Nicht ungeschützt im Internet betreiben.
 
 ## 13. Verifikationsstand und Quellen
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste.
 - Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
-- **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur `conf/`/`data/` samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
+- **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
 
 **Quellen** (Stand Oktober 2026, bitte auf Änderungen prüfen)

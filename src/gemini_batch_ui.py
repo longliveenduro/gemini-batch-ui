@@ -1,12 +1,13 @@
 """Lokale Batch- und Synchron-UI für Gemini 4 Argon (Streamlit).
 
-Start:    pip install -r requirements.txt && streamlit run gemini_batch_ui.py
+Start:    pip install -r requirements.txt && streamlit run src/gemini_batch_ui.py   (im Projektordner)
 API-Key:  Umgebungsvariable GEMINI_API_KEY oder Seitenleiste.
 Modi:     Batch (asynchron, 50 % Rabatt) oder Synchron (nacheinander, impliziter Cache über alle Prompts,
           optional in Gesprächen: je N Prompts bilden einen gemeinsamen Kontext, das nächste Gespräch beginnt neu).
 Ordner:   conf/ (Zugangsdaten, geheim: credentials.json, token.json) und data/ (batch_jobs.json = Verlauf und
           Ergebnisse, pdf_files.json = hochgeladene PDFs, requests_*.jsonl = gesendete Batch-Anfragen).
-          Beide liegen neben dieser Datei, oder unter dem Ordner aus der Umgebungsvariable GEMINI_UI_HOME.
+          Beide liegen im Projektordner neben src/ (dem Ordner dieser Datei), oder unter dem Ordner aus der
+          Umgebungsvariable GEMINI_UI_HOME.
 Drive:    (optional) In der Google Cloud Console die Drive API aktivieren, eine OAuth-Client-ID
           vom Typ „Desktop-App“ erstellen und als conf/credentials.json ablegen.
           Beim ersten Zugriff öffnet sich der Browser zur Freigabe (nur Lesezugriff).
@@ -30,14 +31,16 @@ from google.genai import types
 
 
 def _base_dir():
-    """Ordner, unter dem conf/ und data/ liegen: GEMINI_UI_HOME, sonst der Ordner dieser Datei."""
+    """Projektordner, in dem conf/ und data/ liegen: GEMINI_UI_HOME, sonst der Ordner über src/.
+    Liegt diese Datei nicht in einem Ordner namens src, ist es ihr eigener Ordner (älteres, flaches Layout)."""
     home = os.getenv("GEMINI_UI_HOME")
     if home:
         return Path(home).expanduser().resolve()
     try:
-        return Path(__file__).resolve().parent
+        app_dir = Path(__file__).resolve().parent
     except NameError:  # z. B. bei exec() in Tests
         return Path.cwd()
+    return app_dir.parent if app_dir.name == "src" else app_dir
 
 
 BASE = _base_dir()
