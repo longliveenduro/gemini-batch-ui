@@ -5,7 +5,7 @@ Lokale Streamlit-Oberfläche, um **Gemini 4 Argon** (`gemini-4-argon`) mit **ein
 - **Batch**: asynchron, 50 % des Standardpreises, Ergebnis nach Minuten bis Stunden.
 - **Synchron**: Prompts laufen nacheinander im Hintergrund, mit Aussicht auf Cache-Treffer für das PDF. Optional bilden je N Prompts ein Gespräch (gemeinsamer Kontext).
 
-Dokumentationsstand: 29.10.2026 (Streamlit 1.66, google-genai 2.31, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
+Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
 
 ## Inhalt
 
@@ -58,14 +58,14 @@ Dokumentationsstand: 29.10.2026 (Streamlit 1.66, google-genai 2.31, Gemini 4 Arg
 
 **Voraussetzungen**
 
-- Python 3.11 (vom Besitzer genutzt, 3.10+ sollte genügen).
+- Python 3.12 (vom Besitzer genutzt). Streamlit und google-genai verlangen derzeit mindestens Python 3.11.
 - Ein Gemini-API-Key (in Google AI Studio erzeugen).
 - Optional für Drive: OAuth-Zugang, siehe 6.4.
 
 **Installation** (am besten in einer eigenen Umgebung, damit andere Pakete unberührt bleiben):
 
 ```bash
-conda create -n gemini-batch python=3.11 -y
+conda create -n gemini-batch python=3.12 -y
 conda activate gemini-batch
 pip install -r requirements.txt
 ```
@@ -548,6 +548,7 @@ def test_beispiel(monkeypatch, home):
 | `400 INVALID_ARGUMENT … max_output_tokens cannot exceed 32768` | Batch unterstützt kein Long Decode | Im Batch höchstens 32.768 Token. Mehr nur synchron. |
 | `OSError: inotify watch limit reached` im Terminal | Linux-Limit für Dateibeobachtung erschöpft (oft durch IDE oder Sync-Programm). Die App läuft trotzdem, nur das automatische Neuladen bei Codeänderung fehlt | `--server.fileWatcherType none` oder in `.streamlit/config.toml` setzen, oder `fs.inotify.max_user_watches` erhöhen. |
 | pip-Fehler zu `tensorboard`/`tensorflow` nach Installation | `google-auth-oauthlib` oder `numpy`/`protobuf` wurden hochgezogen, bestehende Pakete verlangen ältere Versionen | Eigene Umgebung benutzen (siehe 3), oder `pip install "google-auth-oauthlib<1.1"`. Kein `-U` in gemeinsamen Umgebungen. |
+| `FutureWarning` von `google.api_core` im pytest-Lauf (Python 3.11, altes `grpcio`) | Hinweis von Google auf künftige Support-Enden. Für App und Tests harmlos | `pytest.ini` blendet beide Meldungen aus. Dauerhaft beheben: eigene Umgebung mit Python 3.12 oder neuer und `pip install -U grpcio`. |
 | Cache-Token überall 0 | implizites Caching ist nicht garantiert. Im Batch zusätzlich undokumentiert. Die erste synchrone Anfrage hat per Definition 0 | `usage`-JSON einer Antwort ansehen. Synchron testen. PDFs, Reihenfolge und Systemanweisung unverändert lassen. |
 | Drive: „Zugriff blockiert“ | Konto nicht als Test user eingetragen | Cloud Console → Audience → Test users (6.4, Schritt 4) |
 | Drive: `credentials.json fehlt. Lege sie nach …/conf` | OAuth-Client nicht in `conf/` abgelegt | 6.4, Schritt 6 |
@@ -601,7 +602,7 @@ def test_beispiel(monkeypatch, home):
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
-- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste.
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Zuletzt liefen alle 121 Tests grün mit Python 3.12.3, Streamlit 1.66.1 und google-genai 2.34.0.
 - Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
 - **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
