@@ -1,2 +1,4 @@
 -r requirements.txt
+streamlit>=1.56  # AppTest unterstützt Datei-Uploads erst ab 1.56
 pytest>=8
+pyyaml>=6

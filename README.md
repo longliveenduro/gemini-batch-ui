@@ -234,7 +234,9 @@ Hinweise:
 | `streamlit` | 1.55 | Oberfläche. Ab 1.55 kennt `st.tabs` den aktiven Tab (`key`, `on_change`, `.open`). Mit älteren Versionen läuft die App, prüft dann aber auch im anderen Tab. |
 | `google-genai` | 2.30.1 | Gemini-SDK. Ab 2.30.1 setzt `generate_content` Long Decode automatisch fort. Ältere Version: synchron auf 32.768 Ausgabe-Token begrenzt (die App warnt). |
 | `google-api-python-client`, `google-auth-oauthlib` | beliebig | Drive-Zugriff (werden erst bei Drive-Nutzung importiert) |
+| `streamlit` (nur Tests) | 1.56 | `AppTest` unterstützt Datei-Uploads erst ab 1.56 (`requirements-dev.txt`). Die App selbst läuft ab 1.55 |
 | `pytest` | 8 | nur für die Tests (`requirements-dev.txt`) |
+| `pyyaml` | 6 | nur für die Tests (`requirements-dev.txt`), prüft die Workflow-Datei |
 
 ## 7. Lokale Dateien und Datenformate
 
@@ -244,11 +246,12 @@ Die App legt `conf/` (Konfiguration und Zugangsdaten) und `data/` (erzeugte Date
 gemini-4-batch/                     # Projektordner
 ├── README.md
 ├── requirements.txt
-├── requirements-dev.txt            # zusätzlich pytest, nur für die Tests
+├── requirements-dev.txt            # zusätzlich pytest und pyyaml, nur für die Tests
 ├── pytest.ini                      # pytest-Einstellungen
 ├── src/
 │   └── gemini_batch_ui.py          # die gesamte App (eine Datei, bewusst)
 ├── tests/                          # automatisierte Tests (Abschnitt 9.3)
+├── .github/workflows/tests.yml     # GitHub Actions: führt pytest automatisch aus (Abschnitt 9.5)
 ├── .streamlit/config.toml          # optional, Streamlit-Einstellungen (aus dem Arbeitsordner gelesen)
 ├── conf/                           # Konfiguration und Zugangsdaten, GEHEIM
 │   ├── credentials.json            # optional: Drive-OAuth-Client (von Hand hineinlegen)
@@ -480,7 +483,7 @@ Die Testsuite liegt in `tests/` und braucht weder Internet noch API-Key. Alle Go
 
 ```bash
 pip install -r requirements-dev.txt        # installiert zusätzlich pytest
-pytest                                     # alle Tests (rund 120, etwa 20 Sekunden)
+pytest                                     # alle Tests (rund 130, etwa 20 Sekunden)
 pytest -m "not ui"                         # nur die schnellen Tests ohne Oberfläche (unter 2 Sekunden)
 pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnitt
 ```
@@ -498,6 +501,7 @@ pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnit
 | `tests/test_drive.py` | Drive-Anmeldung (Token, Neuanmeldung, Netzwerkfehler) und Laden von Dateien |
 | `tests/test_ui.py` | Oberfläche mit AppTest: Formular, Starts, Jobs-Tab, automatische Prüfung, Übernehmen, Löschen, Altbestand, Ordnerlage (Marker `ui`) |
 | `tests/test_docs.py` | gleicht README und Code ab: genannte Funktionen, Konstanten, Schlüssel, Versionen, Testdateien |
+| `tests/test_ci.py` | prüft die GitHub-Actions-Datei: Auslöser, Befehle, Python-Versionen laut README, Rechte |
 
 **Wie getestet wird**
 
@@ -540,6 +544,36 @@ def test_beispiel(monkeypatch, home):
 - [ ] Neue Funktionen, Anzeigen und Abläufe haben einen Test (9.3), Fehlerfälle und ältere Einträge ohne neue Felder sind abgedeckt.
 - [ ] Neue Voreinstellungen, Schlüssel, Funktionen und Dateien stehen in dieser README (Abschnitte 6, 7, 8). `tests/test_docs.py` prüft die wichtigsten Verweise.
 - [ ] Es wird nicht behauptet, etwas sei mit der echten API geprüft, wenn es nur simuliert lief (Abschnitt 13).
+- [ ] Liegt das Projekt auf GitHub: Der Lauf „Tests“ im Tab „Actions“ ist grün (Abschnitt 9.5).
+
+### 9.5 Tests automatisch auf GitHub (GitHub Actions)
+
+Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohne dass man etwas tun muss.
+
+**Wann.** Bei jedem Push, bei jedem Pull Request, auf Knopfdruck (Tab „Actions“ → „Tests“ → „Run workflow“) und einmal pro Woche (montags, 05:17 UTC). Der Wochenlauf ist gewollt: Die Abhängigkeiten stehen als `>=` in `requirements.txt`. Der Wochenlauf meldet, wenn eine neue Version von Streamlit oder google-genai etwas bricht.
+
+**Was.** Für jede Python-Version (3.11 als Mindestversion, 3.12 als genutzte Version) installiert der Lauf `requirements-dev.txt` und führt `python -m pytest` aus, also dasselbe wie lokal. Es braucht weder API-Key noch Secrets, denn alle Google-Dienste sind in den Tests ersetzt.
+
+**Einrichten.** Der Projektordner muss das Hauptverzeichnis des Repositorys sein, denn dort liegt `.github/`. Repository anlegen, pushen, danach erscheint im Tab „Actions“ der Lauf „Tests“. Ein Badge für die README:
+
+```markdown
+![Tests](https://github.com/<benutzer>/<repository>/actions/workflows/tests.yml/badge.svg)
+```
+
+**Bewusste Entscheidungen**
+
+- Nur Leserechte (`permissions: contents: read`), keine Secrets, `persist-credentials: false` beim Auschecken.
+- Ein neuer Push bricht den noch laufenden Lauf desselben Branches ab (`concurrency`).
+- `fail-fast: false`: Schlägt Python 3.11 fehl, läuft 3.12 trotzdem zu Ende, damit man beide Ergebnisse sieht.
+- Die Actions sind an Hauptversionen gebunden (`actions/checkout@v7`, `actions/setup-python@v6`, Stand November 2026). Neue Hauptversionen zieht man von Hand oder per Dependabot nach.
+
+**Pflegen.** Ändert sich die Mindest- oder die genutzte Python-Version in Abschnitt 3, muss die Matrix im Workflow mitziehen, sonst schlägt `tests/test_ci.py` an. Neue Test-Abhängigkeiten gehören in `requirements-dev.txt`, nicht nur in den Workflow.
+
+**Rote Läufe lesen**
+
+- Nur Python 3.11 rot: Syntax oder Paket, das 3.11 nicht kann. Das Log im Schritt „Tests ausführen“ lesen und lokal mit `python3.11` nachstellen.
+- Beide rot, besonders im Wochenlauf: Meist hat eine neue Paketversion etwas gebrochen. Lokal mit `pip install -U streamlit google-genai` bestätigen, dann den Code anpassen oder in `requirements.txt` eine Obergrenze setzen.
+- Der Lauf startet gar nicht: meist ein YAML-Fehler. Die Meldung steht im Tab „Actions“. Lokal prüft `tests/test_ci.py` die Datei mit PyYAML.
 
 ## 10. Fehlersuche
 
@@ -587,7 +621,7 @@ def test_beispiel(monkeypatch, home):
 - Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Argon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
 - Aufräumen alter `data/requests_*.jsonl`.
-- Ein CI-Workflow (z. B. GitHub Actions), der `pytest` bei jedem Push ausführt.
+- Dependabot für die Versionen der Actions (`.github/dependabot.yml`).
 - Wenige, bewusst kostenpflichtige „Live“-Tests gegen die echte API (eigener Marker, standardmäßig übersprungen), die Annahmen aus Abschnitt 5 prüfen.
 
 ## 12. Sicherheit und Datenschutz
@@ -602,7 +636,8 @@ def test_beispiel(monkeypatch, home):
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
-- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Zuletzt liefen alle 121 Tests grün mit Python 3.12.3, Streamlit 1.66.1 und google-genai 2.34.0.
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 127 Tests liefen grün in frisch installierten Umgebungen mit Python 3.11.15 und 3.12.3 (jeweils Streamlit 1.66.1, google-genai 2.34.0) sowie mit der niedrigsten unterstützten Kombination (Streamlit 1.56.0, google-genai 2.30.1). Mit Streamlit 1.55.0 laufen alle bis auf die drei Upload-Tests, die `AppTest` dort noch nicht unterstützt.
+- Der GitHub-Workflow (Abschnitt 9.5) wurde mit `actionlint` geprüft, und seine Befehle liefen wie oben beschrieben in frischen Umgebungen. Auf GitHub selbst lief er noch nicht.
 - Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
 - **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
