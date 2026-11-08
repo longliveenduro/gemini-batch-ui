@@ -437,3 +437,164 @@ def test_entries_from_older_versions_still_open(use_fake, home):
     at.run()
     assert not at.exception
     assert any("synchron, 2 Prompts pro Gespräch" in c for c in captions(at)) and "Alte Antwort" in markdown(at)
+
+
+# ---------- Jobs-Tab: Prompts im Wortlaut und Gespräche fortsetzen ----------
+LONG_PROMPT = ("Erzähle Abschnitt 3 in einfacher Sprache nach und achte auf kurze Sätze und klare, einfache Wörter. "
+               "Am Ende folgt eine Zusammenfassung in drei Sätzen.")
+
+
+def codes(at):
+    return [c.value for c in at.code]
+
+
+def with_rows(entry, *rows):
+    entry["rows"] = list(rows)
+    return entry
+
+
+def test_the_full_prompt_is_shown_only_on_demand(use_fake, home):
+    assert len(LONG_PROMPT) > 90
+    entry = with_rows(finished_batch(prompts={"prompt-1": LONG_PROMPT}), row(prompt=LONG_PROMPT))
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    assert not at.exception and not codes(at)  # nichts ungefragt
+    assert at.expander[0].label == "prompt-1: " + LONG_PROMPT[:90]  # die Überschrift bleibt kurz
+    at.toggle(key=f"prompt:{entry['name']}:prompt-1").set_value(True)
+    at.run()
+    assert codes(at) == [LONG_PROMPT]
+
+
+def test_the_sent_request_is_shown_in_detail_even_before_results_exist(use_fake, home):
+    entry = batch_entry(prompts={"prompt-1": "Erster\nmit zwei Zeilen", "prompt-2": "Zweiter"}, system="Sei kurz.",
+                        pdf="a.pdf, b.pdf", pdfs=["a.pdf", "b.pdf"])
+    write_history(home, [entry])
+    use_fake(batch_state="JOB_STATE_RUNNING")  # noch keine Ergebnisse
+    at = new_app(TAB_JOBS)
+    at.run()
+    assert not at.exception and not codes(at)
+    at.toggle(key="detail:" + entry["name"]).set_value(True)
+    at.run()
+    assert codes(at) == ["Sei kurz.", "Erster\nmit zwei Zeilen", "Zweiter"]
+    assert any("1. a.pdf, 2. b.pdf" in m for m in markdown(at))
+
+
+def test_request_details_name_the_conversations_and_a_missing_system_instruction(use_fake, home):
+    entry = sync_entry(system="", prompts={"prompt-1": "A", "prompt-2": "B", "prompt-3": "C"}, group=2)
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    at.toggle(key="detail:" + entry["name"]).set_value(True)
+    at.run()
+    assert codes(at) == ["A", "B", "C"]
+    assert "**prompt-2** (Gespräch 1, Runde 2)" in markdown(at) and "**prompt-3** (Gespräch 2, Runde 1)" in markdown(at)
+    assert any("Keine Systemanweisung" in c for c in captions(at))
+
+
+def test_a_continued_prompt_is_listed_by_its_new_part_and_says_so_in_detail(use_fake, home, app):
+    sent = app.conversation_text([("Frage", "Antwort"), ("Frage 2", "Antwort 2")], "Neue Frage")
+    entry = with_rows(finished_batch(prompts={"prompt-1": sent}), row(prompt=sent))
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    assert at.expander[0].label == "prompt-1: ↪ Neue Frage"
+    at.toggle(key=f"prompt:{entry['name']}:prompt-1").set_value(True)
+    at.run()
+    assert codes(at) == [sent] and any("Verlauf von 2 Runde(n)" in c for c in captions(at))
+
+
+def test_the_history_text_can_be_shown_for_copying(use_fake, home, app):
+    entry = finished_batch()
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    assert not codes(at)
+    at.toggle(key=f"hist:{entry['name']}:prompt-1").set_value(True)
+    at.run()
+    assert codes(at) == [app.conversation_text([("Eins", "Gesicherte Antwort")]).strip()]  # st.code kürzt Leerraum am Rand
+    assert any("Verlauf aus 1 Runde(n)" in c for c in captions(at))
+
+
+def test_a_row_without_an_answer_offers_no_continuation(use_fake, home):
+    write_history(home, [with_rows(finished_batch(), row(text="", error="Blockiert"))])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    assert not at.exception and any("Blockiert" in e.value for e in at.error)
+    assert not [b for b in at.button if b.label == "Gespräch fortsetzen"]
+    assert not [t for t in at.toggle if t.label == "Verlaufstext zeigen"]
+
+
+def test_continue_conversation_fills_the_form_with_the_history(use_fake, home, app):
+    entry = sync_entry(rows=[row(key="prompt-1", prompt="P1", text="A1"), row(key="prompt-2", prompt="P2", text="A2")])
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    at.button(key=f"talk:{entry['name']}:prompt-2").click()
+    at.run()
+    assert not at.exception and at.session_state["view"] == TAB_NEW
+    assert at.text_area(key="raw").value == app.conversation_text([("P1", "A1"), ("P2", "A2")])  # beide Runden
+    assert at.radio(key="mode").value == MODE_SYNC and at.text_area(key="system").value == "Sei kurz."
+    assert at.selectbox(key="think").value == "low" and at.number_input(key="max_sync").value == 4096
+    assert at.number_input(key="group").value == 1  # der Verlauf steckt im Prompt: keine Gesprächsgruppen
+    # Der einmalige Hinweis (st.info) erscheint erst im echten Browser nach dem vollen Rerun, nicht im AppTest.
+    assert any(app.TALK_NEW in w.value for w in at.warning) and button(at, "Synchron starten").disabled
+    assert any("1 von 1 Prompt(s) setzen ein früheres Gespräch fort" in c for c in captions(at))
+    set_prompts(at, at.text_area(key="raw").value + "Neuer Prompt")
+    assert not [w for w in at.warning if app.TALK_NEW in w.value] and not button(at, "Synchron starten").disabled
+
+
+def test_continuing_a_batch_answer_switches_to_batch_mode(use_fake, home):
+    entry = finished_batch(think="medium")
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    at.button(key=f"talk:{entry['name']}:prompt-1").click()
+    at.run()
+    assert at.radio(key="mode").value == MODE_BATCH and at.selectbox(key="think").value == "medium"
+    assert button(at, "Batch starten").disabled  # unter der Marke fehlt der neue Prompt
+
+
+def test_a_separator_line_in_an_answer_does_not_split_the_continued_prompt(use_fake, home):
+    entry = with_rows(finished_batch(), row(text="Oben\n---\nUnten"))
+    write_history(home, [entry])
+    use_fake()
+    at = new_app(TAB_JOBS)
+    at.run()
+    at.button(key=f"talk:{entry['name']}:prompt-1").click()
+    at.run()
+    assert not [line for line in at.text_area(key="raw").value.splitlines() if line.strip() == "---"]
+    assert any("1 Prompt(s) erkannt" in c for c in captions(at))
+
+
+def test_a_conversation_can_be_continued_again_and_again(use_fake, home, app):
+    fake = use_fake()
+    at = new_app()
+    at.run()
+    sync_mode(at)
+    set_prompts(at, "Eins")
+    click(at, "Synchron starten")
+    wait_for_run_end(home)  # Antwort 1
+    for rounds, follow_up in ((1, "Zwei"), (2, "Drei")):
+        newest = read_history(home)[0]
+        at.session_state["view"] = TAB_JOBS
+        at.run()
+        at.button(key=f"talk:{newest['name']}:prompt-1").click()
+        at.run()
+        raw = at.text_area(key="raw").value
+        assert raw.count(app.TALK_BEGIN) == 1 and raw.count(app.TALK_INTRO) == 1  # nichts ist verschachtelt
+        assert len(app.parse_conversation(raw)[0]) == rounds
+        set_prompts(at, raw + follow_up)
+        click(at, "Synchron starten")
+        wait_for_run_end(home)
+    sent = [call["contents"][0][1][0] for call in fake.calls]  # der Prompt jeder Anfrage (keine PDFs)
+    assert sent[0] == "Eins"
+    assert app.parse_conversation(sent[1]) == ([("Eins", "Antwort 1")], "Zwei")
+    assert app.parse_conversation(sent[2]) == ([("Eins", "Antwort 1"), ("Zwei", "Antwort 2")], "Drei")

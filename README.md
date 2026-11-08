@@ -50,6 +50,8 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34,
 - **Jobs und Ergebnisse**: Verlauf aller Läufe, automatische Statusprüfung alle 10 Sekunden solange der Tab offen ist, Ergebnisse mit Token- und Cache-Angaben, Markdown-Download, Rohdaten-JSON.
 - **Lokale Sicherung** der Ergebnisse (`data/batch_jobs.json`), auch nach Ablauf der Aufbewahrung bei Google.
 - **Eingaben übernehmen**: Prompts und Einstellungen eines früheren Eintrags zurück ins Formular holen. **Eintrag löschen** (nur lokal).
+- **Prompts im Wortlaut**: Im Tab „Jobs und Ergebnisse“ zeigt ein Klick die gesendete Anfrage im Detail (PDFs, Systemanweisung, jeder Prompt, auch solange ein Batch noch keine Ergebnisse hat) und je Ergebnis den vollständigen Prompt.
+- **Gespräch fortsetzen**: Zu jeder Antwort erzeugt die App auf Klick den bisherigen Gesprächsverlauf als Text (früherer Prompt und deine Antwort dazu, bei synchronen Gesprächen alle Runden) und legt ihn ins Formular „Neue Anfrage“. Darunter schreibt man den neuen Prompt. Das geht beliebig oft hintereinander, der Verlauf wächst dabei nur um eine Runde.
 - **Wiederverwendung hochgeladener PDFs** über Neustarts hinweg (`data/pdf_files.json`), damit die Datei-Referenz gleich bleibt.
 - **Drive-Anmeldung erneuert sich selbst**, wenn die Freigabe abgelaufen ist.
 - **Aufgeräumte Ordner**: Zugangsdaten in `conf/`, erzeugte Daten in `data/`. Dateien eines älteren Stands werden beim Start dorthin übernommen.
@@ -108,7 +110,7 @@ Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden
 | PDF-Dateien | Mehrere Dateien möglich. Ein zweites PDF ersetzt das erste nicht. |
 | PDFs aus Google Drive | Button „Meine PDFs aus Drive laden“ füllt die Mehrfachauswahl. Zusätzlich Links oder Datei-IDs einfügen. Reihenfolge: hochgeladene Dateien, dann Drive-Auswahl, dann eingefügte Links. Die Reihenfolge steht als Hinweis unter dem Bereich. |
 | Systemanweisung | Optional, gilt für jede Anfrage. |
-| Prompts | Ein Textfeld, mehrere Prompts durch eine Zeile nur mit `---` trennen. |
+| Prompts | Ein Textfeld, mehrere Prompts durch eine Zeile nur mit `---` trennen. Beginnt ein Prompt mit einem Gesprächsverlauf (aus „Gespräch fortsetzen“), steht der neue Prompt unter `[Mein neuer Prompt]`. Solange dort nichts steht, ist der Start gesperrt. |
 | Prompts pro Gespräch | Nur synchron. 1 = jeder Prompt für sich. 2 = je zwei Prompts bilden ein Gespräch (der zweite sieht den ersten und dessen Antwort), die nächsten zwei ein neues usw. Das PDF geht in jedem Gespräch mit dem ersten Prompt raus. |
 | Denktiefe | „Standard“ (kein Parameter, Argon nutzt dann `medium`), `low`, `medium`, `high`. Voreinstellung `high`. |
 | Max. Ausgabe-Token | Batch: bis 32.768 (Voreinstellung 32.768). Synchron: bis 1.048.576 (Voreinstellung 65.536), über 32.768 setzt das SDK automatisch Long Decode ein. Denk-Token zählen zum Limit. |
@@ -122,11 +124,24 @@ Ohne angehängtes PDF werden die Prompts ohne PDF gesendet (steht als Hinweis im
 - **Eintrag**: Auswahlliste, neuester Eintrag oben.
 - **Eingaben übernehmen**: füllt „Neue Anfrage“ mit Prompts, Systemanweisung, Modus, Denktiefe, Token-Limit und Gesprächsgröße. PDFs müssen neu angehängt werden, bereits hochgeladene Dateien werden dabei wiederverwendet.
 - **Eintrag löschen** (Bestätigung im Popover): entfernt den lokalen Eintrag samt gesicherter Ergebnisse. Bei Google bleibt alles unverändert. Deaktiviert, solange der Eintrag läuft.
+- **Gesendete Anfrage im Detail** (Schalter, standardmäßig aus): zeigt die PDFs in ihrer Reihenfolge, die Systemanweisung und jeden Prompt im Wortlaut, bei synchronen Gesprächen mit Gespräch und Runde. Das geht auch, solange ein Batch noch läuft und es noch keine Ergebnisse gibt.
 - **Batch**: Buttons „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“. Solange der Tab offen und der Batch nicht fertig ist, prüft die App alle 10 Sekunden selbst. Ist der Batch fertig, werden die Ergebnisse geladen und lokal gesichert. Danach braucht ein Öffnen keinen Abruf mehr.
 - **Synchron**: Zustand `läuft`, `fertig`, `abgebrochen`, `fehlgeschlagen` oder `unterbrochen`, Fortschritt „n von m Prompts“, Button „Lauf abbrechen“ (greift nach der gerade laufenden Anfrage).
-- **Ergebnisse**: Summenzeile (Eingabe-Token gesamt und davon aus dem Cache), Download „Ergebnisse als Markdown“, pro Prompt ein Ausklappfeld mit Antwort, Warnungen, Detailzeile (Modell, Abschlussgrund, Token, Dauer) und rohen `usage`-Daten als einklappbarem JSON.
+- **Ergebnisse**: Summenzeile (Eingabe-Token gesamt und davon aus dem Cache), Download „Ergebnisse als Markdown“, pro Prompt ein Ausklappfeld mit Antwort, Warnungen, Detailzeile (Modell, Abschlussgrund, Token, Dauer) und rohen `usage`-Daten als einklappbarem JSON. Die Überschrift zeigt nur die ersten 90 Zeichen des Prompts (bei einer Fortsetzung ein ↪ und den neuen Prompt). Der Schalter „Prompt im Wortlaut“ zeigt den ganzen Prompt. Unter der Antwort stehen „Gespräch fortsetzen“ und der Schalter „Verlaufstext zeigen“.
 
 **Warnungen in den Ergebnissen.** `MAX_TOKENS` bedeutet: Denk- und Ausgabe-Token haben das Limit erreicht, die Antwort ist abgeschnitten. Jeder andere Abschlussgrund außer `STOP` (z. B. `SAFETY`) wird ebenfalls gemeldet.
+
+**Gespräch fortsetzen.** Gemini behält zwischen zwei Anfragen nichts. Wer ein früheres Gespräch weiterführen will, muss es mitsenden. „Gespräch fortsetzen“ (unter jeder Antwort mit Text) macht das in einem Schritt:
+
+1. Die App baut aus dem früheren Prompt und deiner Antwort dazu einen Text (Format in Abschnitt 7). Bei synchronen Gesprächen (Prompts pro Gespräch größer als 1) gehören alle früheren Runden dieses Gesprächs bis zur gewählten Antwort dazu.
+2. Sie legt den Text ins Feld „Prompts“ von „Neue Anfrage“ und übernimmt Systemanweisung, Modus, Denktiefe und Token-Limit des Eintrags. „Prompts pro Gespräch“ steht danach auf 1, weil der Verlauf im Prompt steckt. Die PDFs müssen wieder angehängt werden (der Hinweis nennt sie).
+3. Man schreibt den neuen Prompt unter `[Mein neuer Prompt]` und startet. Der Start bleibt gesperrt, solange dort nichts steht.
+
+„Verlaufstext zeigen“ zeigt denselben Text zum Kopieren, z. B. für ein anderes Programm.
+
+- **Beliebig oft**: Setzt man eine Fortsetzung selbst fort, liest die App den Verlauf aus dem gesendeten Prompt zurück und hängt nur die neue Runde an (Runde 1, 2, 3 …). Verläufe werden nicht ineinander geschachtelt.
+- **Kosten**: Der Verlauf geht bei jeder Anfrage als Text mit und zählt als Eingabe. Lange Verläufe kosten entsprechend. Die PDFs stehen weiter an erster Stelle, der gemeinsame Anfang (Prefix) für das implizite Caching bleibt also gleich.
+- **Was es technisch ist**: eine einzelne Nutzernachricht mit eingefügtem Verlauf, kein echter Mehr-Runden-Verlauf mit Modellrolle (siehe Abschnitt 11).
 
 ## 5. Kosten sparen: Batch, Caching, Gespräche
 
@@ -196,6 +211,11 @@ Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token
 | `MODE_BATCH`, `MODE_SYNC` | Radio-Texte | Werte des Modus-Schalters |
 | `THINK_LEVELS` | Standard, low, medium, high | Auswahl Denktiefe |
 | `HINT` | „(bitte den Tab nicht wechseln)“ | Zusatz im Statusfeld beim Start |
+| `SEPARATOR` | Muster: Zeile nur mit `---` | trennt im Formular die Prompts |
+| `TALK_INTRO` | Einleitungssatz | steht über jedem Gesprächsverlauf („Unten steht der bisherige Verlauf …“) |
+| `TALK_BEGIN`, `TALK_END`, `TALK_NEW` | `[Bisheriger Gesprächsverlauf]`, `[Ende des bisherigen Gesprächsverlaufs]`, `[Mein neuer Prompt]` | Marken des Verlaufstexts, je in einer eigenen Zeile |
+| `TALK_MINE`, `TALK_YOURS` | `[Runde {n}: Mein Prompt]`, `[Runde {n}: Deine Antwort dazu]` | Marken je Runde |
+| `TALK_MARK` | Muster | erkennt genau diese Marken wieder (`parse_conversation()`) |
 
 Weitere Voreinstellungen stehen direkt im UI-Teil: Denktiefe `high` (`st.session_state.setdefault("think", "high")`), Ausgabe-Token synchron 65.536 und im Batch 32.768, Prompts pro Gespräch 1. Wiederholungen bei vorübergehenden Fehlern in `ask()`: 3 Versuche, Pause 10 s und 20 s, nur für HTTP 429, 500, 503, 504.
 
@@ -365,6 +385,34 @@ Eine Zeile pro Prompt, genau das, was an die Batch-API ging (Anfrageformat `Gene
 
 Nützlich zur Kontrolle: `grep -o '"thinking_level": "[a-z]*"' data/requests_*.jsonl | sort | uniq -c`.
 
+### Gesprächsverlauf im Prompt (Fortsetzung eines Gesprächs)
+
+„Gespräch fortsetzen“ speichert nichts Neues in `batch_jobs.json`. Der Verlauf ist reiner Text im Prompt des neuen Eintrags und sieht so aus (`conversation_text()`):
+
+```text
+Unten steht der bisherige Verlauf unseres Gesprächs: meine früheren Prompts und deine Antworten dazu. …
+
+[Bisheriger Gesprächsverlauf]
+
+[Runde 1: Mein Prompt]
+<früherer Prompt>
+
+[Runde 1: Deine Antwort dazu]
+<Antwort des Modells>
+
+[Runde 2: Mein Prompt]
+…
+
+[Ende des bisherigen Gesprächsverlaufs]
+
+[Mein neuer Prompt]
+<der neue Prompt, vom Benutzer geschrieben>
+```
+
+- Jede Marke steht allein in ihrer Zeile. `parse_conversation()` liest den Text wieder ein. Ist der Aufbau durcheinander (z. B. von Hand bearbeitet), gilt der Prompt als gewöhnlicher Prompt und wird beim nächsten Fortsetzen nicht abgeflacht. Fehlt nur die Marke `[Mein neuer Prompt]`, zählt der Rest nach dem Ende des Verlaufs als neuer Prompt.
+- Frühere Prompts und Antworten gehen durch `talk_safe()`: Eine Zeile nur mit `---` würde im Formular die Prompts trennen und wird zu `***` (in Markdown dieselbe Trennlinie). Zeilen, die wie eine Marke aussehen, bekommen einen Rückstrich. Das ist wiederholbar, ohne dass sich etwas ändert.
+- Beim Fortsetzen holt `history_turns()` die Runden aus dem Eintrag. Beginnt der erste Prompt selbst mit einem Verlauf, wird dieser davor eingereiht, statt zu verschachteln.
+
 ## 8. Architektur
 
 Eine Datei, bewusst ohne Klassen und ohne Datenbank: Funktionen oben, Oberfläche unten. Streamlit führt das Skript bei **jeder** Interaktion von oben nach unten neu aus. Alles, was länger leben muss, steckt deshalb in Dateien, in `st.session_state` oder in `runtime()`.
@@ -379,8 +427,9 @@ Eine Datei, bewusst ohne Klassen und ohne Datenbank: Funktionen oben, Oberfläch
 | Google Drive | `drive_service()` (OAuth, Neuanmeldung bei `RefreshError`), `drive_id()` (ID aus Link), `drive_fetch()` (PDF laden/exportieren) |
 | Gemini | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`), `pick()`, `parse_line()`, `parse_results()`, `refresh()` (Status + Ergebnisse laden, Endergebnis sichern), `batch_info()` |
 | Synchroner Modus | `ask()` (Retry), `run_sync()` (Thread-Funktion), `start_sync()`, `sync_view()` |
-| Anzeige | `show_rows()`, `sync_panel()`, `job_panel()` (läuft als Fragment) |
-| Verlauf und Formular | `entry_label()`, `reuse_inputs()` (Callback), `delete_entry()` (Callback) |
+| Gesprächsverlauf als Text | `entry_group()` (Prompts pro Gespräch eines Eintrags), `talk_safe()`, `conversation_text()`, `parse_conversation()`, `history_turns()`, `short_prompt()` |
+| Anzeige | `show_text()`, `show_prompt()`, `request_details()`, `talk_tools()`, `show_rows()`, `sync_panel()`, `job_panel()` (läuft als Fragment) |
+| Verlauf und Formular | `entry_label()`, `fill_form()` (Hilfe), `reuse_inputs()` und `continue_conversation()` (Callbacks), `delete_entry()` (Callback) |
 | UI | Seitenleiste, Tabs, `with tab_new:` (Formular + Start-Handler), `with tab_jobs:` (Auswahl, Buttons, Fragment) |
 
 Die UI-Grenze ist die Zeile `# ---------- UI ----------`. Alles darüber ist ohne Oberfläche testbar (siehe 9.3). Die Fixture `app` in `tests/conftest.py` lädt genau diesen Teil.
@@ -414,6 +463,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 - **Tab-Erkennung**: `st.tabs(TABS, key="view", on_change="rerun")` (ab 1.55). `tab_jobs.open` sagt, ob der Jobs-Tab offen ist. Der Inhalt versteckter Tabs läuft trotzdem, gesteuert wird über `.open`. Ein Tab-Wechsel löst einen **vollständigen Rerun** aus. Das unterbricht jedes Skript, das gerade lange läuft (Uploads im Start-Handler). Lange Arbeit gehört deshalb in einen Hintergrund-Thread (siehe `start_sync`). Bei älteren Streamlit-Versionen schlägt der Aufruf mit `TypeError` fehl, der Fallback ist `st.tabs(TABS)`; `getattr(tab_jobs, "open", None) is not False` ergibt dann „immer prüfen“.
 - **Polling per Fragment**: `st.fragment(run_every=POLL_SECONDS if polling else None)(job_panel)(...)`. Die Entscheidung `polling` wird bei jedem vollen Lauf neu getroffen (Tab offen und Eintrag läuft). Um einen laufenden Timer zu beenden, ruft das Fragment `st.rerun()` auf (voller Rerun). Die Argumente eines Timer-Reruns sind **veraltet** (Stand des letzten vollen Laufs). Ein Fragment muss veränderliche Daten deshalb selbst neu laden (`sync_panel` liest den Eintrag aus der Datei, `job_panel` nutzt `batch_info()` und die Session).
+- **Button im Fragment, der das Formular füllt**: Ein Klick im Fragment (die Ergebnisse laufen in `job_panel`) löst nur einen Fragment-Lauf aus. „Gespräch fortsetzen“ füllt das Formular deshalb in einem **Callback** (`continue_conversation`: Widget-Werte lassen sich nur setzen, bevor das Widget im Lauf erzeugt wurde) und ruft danach `st.rerun()` auf, damit ein voller Lauf das Formular zeigt und den Tab wechselt. Im `AppTest` ist schon der erste Lauf voll. Dort verbraucht er den einmaligen Hinweis `reused_note`, im Browser erscheint er nach dem Rerun.
 - **Threads**: `run_sync` läuft ohne `ScriptRunContext`. Dort **keine** `st.*`-Aufrufe und keine Streamlit-Cache-Funktionen. `rt = runtime()` wird im Hauptthread geholt und als Argument übergeben. Schreibzugriffe auf den Verlauf nur über `mutate_jobs(rt.lock, …)` (liest unter Sperre, schreibt atomar über `batch_jobs.tmp` + `os.replace`).
 - **Abbruch**: `rt.cancel` ist eine Menge von Eintragsnamen. `run_sync` prüft sie vor jedem Prompt. Eine laufende Anfrage wird nicht abgebrochen.
 - **Unbekannte Attribute**: `DeltaGenerator` liefert für unbekannte Namen ein aufrufbares Objekt statt `AttributeError`. Darum ist `getattr(…, "open", None) is not False` korrekt für ältere Versionen.
@@ -422,7 +472,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 | Schlüssel | Zweck |
 |---|---|
-| `view` | aktiver Tab (nur ab 1.55 wirksam). `reuse_inputs` setzt ihn auf „Neue Anfrage“ |
+| `view` | aktiver Tab (nur ab 1.55 wirksam). `reuse_inputs` und `continue_conversation` setzen ihn auf „Neue Anfrage“ |
 | `mode` | Modus-Radio (`MODE_BATCH` / `MODE_SYNC`) |
 | `system`, `raw` | Systemanweisung, Prompts-Textfeld |
 | `think` | Denktiefe (Voreinstellung per `setdefault`) |
@@ -431,10 +481,12 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 | `label_batch`, `label_sync` | Namensfeld je Modus |
 | `sel` | Auswahl im Jobs-Tab (Wert = `entry_label(eintrag)`). Der Start-Handler setzt ihn auf den neuen Eintrag |
 | `drive_pdfs` | `{Anzeigename: Drive-ID}` der geladenen Drive-Liste |
-| `reused_note` | einmaliger Hinweis nach „Eingaben übernehmen“ (wird beim Anzeigen entfernt) |
+| `reused_note` | einmaliger Hinweis nach „Eingaben übernehmen“ und „Gespräch fortsetzen“ (wird beim Anzeigen entfernt) |
 | `res:<name>` | Ergebnisstand eines Batches in der Sitzung (`state`, `rows`, `error`, `model`) |
 | `err:<name>`, `errn:<name>` | letzte Abruffehlermeldung, Zähler aufeinanderfolgender Fehler |
-| Button-Schlüssel | `chk:`, `cx:` (Batch prüfen/abbrechen), `stop:` (Lauf abbrechen), `dl:` (Download), `reuse:`, `del:` jeweils plus Eintragsname |
+| `detail:<name>` | Schalter „Gesendete Anfrage im Detail“ je Eintrag |
+| `prompt:<name>`, `hist:<name>` | Schalter „Prompt im Wortlaut“ und „Verlaufstext zeigen“ je Ergebnis (nach dem Eintragsnamen folgt `:` und der Prompt-Schlüssel, z. B. `prompt-1`) |
+| Button-Schlüssel | `chk:`, `cx:` (Batch prüfen/abbrechen), `stop:` (Lauf abbrechen), `dl:` (Download), `reuse:`, `del:`, `talk:` (Gespräch fortsetzen) jeweils plus Eintragsname (bei `talk:` danach `:` und der Prompt-Schlüssel) |
 
 ## 9. Weiterentwickeln
 
@@ -469,6 +521,8 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 3. `job_panel()` verteilt nach `j.get("mode")`. Neues Panel ergänzen. Entscheidung `running` im `with tab_jobs:`-Block ergänzen.
 4. `reuse_inputs()` für den neuen Modus erweitern.
 
+**Aufbau des Verlaufstexts ändern** (Einleitung, Marken, Beschriftung): `TALK_*` anpassen. `TALK_MARK` muss zu den Marken passen, `test_every_mark_constant_is_recognized_by_the_mark_pattern` meldet Abweichungen. Bereits gesendete Prompts bleiben nur dann „abflachbar“, wenn ihre Marken noch erkannt werden. Sonst gelten sie als gewöhnliche Prompts.
+
 **Neues Ergebnisfeld anzeigen**: Feld in `parse_line()` berechnen, in `show_rows()` ausgeben (mit `.get()`), bei Bedarf in den Markdown-Download aufnehmen.
 
 **Explizites Caching für andere Modelle**: Für Argon nicht möglich. Für Modelle, die es unterstützen, wäre der Weg: Cache mit den PDFs anlegen (`client.caches.create(...)` mit Laufzeit), im Request nur noch `cached_content` referenzieren und die PDFs weglassen, Speicherkosten und Mindestgrößen beachten. Als Umschalter nur anzeigen, wenn das Modell es kann. Garantiert die Ersparnis, kostet aber Speicherzeit.
@@ -483,7 +537,7 @@ Die Testsuite liegt in `tests/` und braucht weder Internet noch API-Key. Alle Go
 
 ```bash
 pip install -r requirements-dev.txt        # installiert zusätzlich pytest
-pytest                                     # alle Tests (rund 130, etwa 20 Sekunden)
+pytest                                     # alle Tests (rund 160, etwa 25 Sekunden)
 pytest -m "not ui"                         # nur die schnellen Tests ohne Oberfläche (unter 2 Sekunden)
 pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnitt
 ```
@@ -496,10 +550,10 @@ pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnit
 | `tests/conftest.py` | Fixtures: `home` (Wegwerf-Ordner als `GEMINI_UI_HOME`, Dummy-Key), `app` (die App ohne Oberfläche als Objekt), `rt` (Ersatz für `runtime()`), `fake_time` (keine echten Pausen). Dazu eine Sperre gegen echte API-Zugriffe und ein Sicherheitsnetz: ändert ein Test `conf/` oder `data/` im Projektordner, schlägt der Lauf am Ende fehl |
 | `tests/fakes.py` | `FakeGemini` (Files API, Batch-API, `generate_content`, zeichnet Aufrufe auf), `make_response`, `ApiError`, `FakeDrive`, `install`, `install_drive` |
 | `tests/helpers.py` | `wait_until`, `wait_for_run_end`, Verlauf lesen und schreiben, Eintrags-Vorlagen (`batch_entry`, `sync_entry`, `finished_batch`, `row`), AppTest-Kürzel (`new_app`, `click`, `set_prompts`, `captions`, `markdown`) |
-| `tests/test_logic.py` | reine Logik: Parser, Hilfsfunktionen, Ordner und Altbestand, Verlaufsdatei, PDF-Upload, Batch-Anfragen, Wiederholungen |
+| `tests/test_logic.py` | reine Logik: Parser, Hilfsfunktionen, Ordner und Altbestand, Verlaufsdatei, PDF-Upload, Batch-Anfragen, Wiederholungen, Gesprächsverlauf als Text (Aufbau, Wiedereinlesen, mehrfaches Fortsetzen) |
 | `tests/test_sync_worker.py` | synchroner Modus: Anfrageaufbau, Gespräche, Fehlerfälle, Abbruch, Zustände |
 | `tests/test_drive.py` | Drive-Anmeldung (Token, Neuanmeldung, Netzwerkfehler) und Laden von Dateien |
-| `tests/test_ui.py` | Oberfläche mit AppTest: Formular, Starts, Jobs-Tab, automatische Prüfung, Übernehmen, Löschen, Altbestand, Ordnerlage (Marker `ui`) |
+| `tests/test_ui.py` | Oberfläche mit AppTest: Formular, Starts, Jobs-Tab, automatische Prüfung, Übernehmen, Löschen, Altbestand, Ordnerlage, Prompt-Anzeige, Gespräch fortsetzen (Marker `ui`) |
 | `tests/test_docs.py` | gleicht README und Code ab: genannte Funktionen, Konstanten, Schlüssel, Versionen, Testdateien |
 | `tests/test_ci.py` | prüft die GitHub-Actions-Datei: Auslöser, Befehle, Python-Versionen laut README, Rechte |
 
@@ -609,6 +663,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Keine Kostenanzeige (Preise ändern sich), keine Streaming-Anzeige, keine Prompt-Bibliothek, kein Zählen der Token vor dem Start.
 - Texte der Oberfläche sind fest auf Deutsch im Code.
 - Drive: nur PDFs und Google-Dokumente (Export als PDF). Liste zeigt höchstens 50 Dateien, weitere per Link oder ID.
+- „Gespräch fortsetzen“ schickt den Verlauf als Text in **einer** Nutzernachricht. Es ist kein echter Mehr-Runden-Verlauf mit Modellrolle, und gespeichert sind nur die sichtbaren Antworten (ohne Denkteile). Lange Verläufe kosten bei jeder Anfrage Eingabe-Token, und die PDFs müssen neu angehängt werden.
 
 **Ideen** (grob nach Nutzen)
 
@@ -618,6 +673,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Token zählen vor dem Start (`count_tokens`), um die PDF-Größe und die 4.096-Token-Schwelle zu sehen.
 - Streaming der Antworten im synchronen Modus mit Zwischenständen im Eintrag.
 - Eingaben des Formulars beim Neustart wiederherstellen.
+- Fortsetzung als echter Mehr-Runden-Verlauf (`user`/`model`-Nachrichten statt Text im Prompt). Dazu müsste der Eintrag die Modellantworten samt Denk-Signaturen speichern.
 - Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Argon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
 - Aufräumen alter `data/requests_*.jsonl`.
@@ -636,10 +692,11 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
-- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 127 Tests liefen grün in frisch installierten Umgebungen mit Python 3.11.15 und 3.12.3 (jeweils Streamlit 1.66.1, google-genai 2.34.0) sowie mit der niedrigsten unterstützten Kombination (Streamlit 1.56.0, google-genai 2.30.1). Mit Streamlit 1.55.0 laufen alle bis auf die drei Upload-Tests, die `AppTest` dort noch nicht unterstützt.
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 157 Tests liefen grün in frisch installierten Umgebungen mit Python 3.11.15 und 3.12.3 (jeweils Streamlit 1.67.0, google-genai 3.0.0) sowie mit der niedrigsten unterstützten Kombination (Python 3.12.3, Streamlit 1.56.0, google-genai 2.30.1). Mit Streamlit 1.55.0 laufen alle bis auf die drei Upload-Tests, die `AppTest` dort noch nicht unterstützt.
+- „Gespräch fortsetzen“ und die Prompt-Anzeige wurden zusätzlich einmal in einem echten Headless-Chromium gegen die laufende App mit Ersatzdiensten durchgespielt (Klick im Fragment, Tab-Wechsel, Hinweis, Startsperre, zweites Fortsetzen ohne Verschachtelung). Dieser Browsertest gehört nicht zur Testsuite.
 - Der GitHub-Workflow (Abschnitt 9.5) wurde mit `actionlint` geprüft, und seine Befehle liefen wie oben beschrieben in frischen Umgebungen. Auf GitHub selbst lief er noch nicht.
 - Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
-- **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
+- **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, „Gespräch fortsetzen“ (wie das Modell auf einen Prompt mit eingefügtem Verlauf antwortet), Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
 
 **Quellen** (Stand Oktober 2026, bitte auf Änderungen prüfen)
@@ -657,5 +714,6 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - **Implizites Caching**: Google erkennt gleiche Anfänge automatisch und berechnet sie günstiger. Keine Zusage.
 - **Explizites Caching**: man legt selbst einen Cache an und referenziert ihn. Garantiert die Ersparnis, für Argon nicht verfügbar.
 - **Long Decode**: automatische Fortsetzung über mehrere Teilanfragen, wenn die Ausgabe das Limit pro Anfrage überschreitet (SDK ab 2.30.1, nur synchron).
+- **Runde**: ein früherer Prompt samt deiner Antwort dazu. Ein Gesprächsverlauf besteht aus Runden (Abschnitt 7).
 - **Fragment**: ein Streamlit-Abschnitt, der sich allein neu ausführen kann (hier für die automatische Statusprüfung).
 - **ScriptRunContext**: Streamlits Laufzeitkontext. Hintergrund-Threads haben keinen, deshalb dort keine `st.*`-Aufrufe.

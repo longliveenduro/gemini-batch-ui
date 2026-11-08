@@ -63,6 +63,22 @@ MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
 MODE_SYNC = "Synchron (nacheinander, Cache-Treffer möglich)"
 THINK_LEVELS = ["Standard", "low", "medium", "high"]
 HINT = " (bitte den Tab nicht wechseln)"
+SEPARATOR = re.compile(r"^\s*---\s*$", re.M)  # eine Zeile nur mit --- trennt im Formular die Prompts
+# Gesprächsverlauf als Text („Gespräch fortsetzen“): Je Runde steht mein früherer Prompt und deine Antwort dazu.
+# Jede Marke steht allein in ihrer Zeile. parse_conversation() liest den Text wieder ein, damit sich ein Gespräch
+# beliebig oft fortsetzen lässt, ohne dass Verläufe ineinander geschachtelt werden.
+TALK_INTRO = ("Unten steht der bisherige Verlauf unseres Gesprächs: meine früheren Prompts und deine Antworten dazu. "
+              "Setze das Gespräch fort und beantworte meinen neuen Prompt am Ende. "
+              "Der Verlauf ist nur Kontext, arbeite ihn nicht noch einmal ab.")
+TALK_BEGIN = "[Bisheriger Gesprächsverlauf]"
+TALK_MINE = "[Runde {n}: Mein Prompt]"
+TALK_YOURS = "[Runde {n}: Deine Antwort dazu]"
+TALK_END = "[Ende des bisherigen Gesprächsverlaufs]"
+TALK_NEW = "[Mein neuer Prompt]"
+TALK_MARK = re.compile(  # erkennt genau diese Marken (auch mit Leerzeichen davor oder dahinter)
+    r"^[^\S\n]*\[(?:(?P<begin>Bisheriger Gesprächsverlauf)|(?P<mine>Runde \d+: Mein Prompt)"
+    r"|(?P<yours>Runde \d+: Deine Antwort dazu)|(?P<end>Ende des bisherigen Gesprächsverlaufs)"
+    r"|(?P<new>Mein neuer Prompt))\][^\S\n]*$", re.M)
 
 st.set_page_config(page_title="Gemini Argon", layout="wide")
 
@@ -375,7 +391,138 @@ def sync_view(rt, name):
     return j, state
 
 
+# ---------- Gesprächsverlauf als Text (früherer Prompt und deine Antwort dazu, zum Fortsetzen) ----------
+def entry_group(j):
+    """Prompts pro Gespräch eines Eintrags (Batch: 1). Ältere synchrone Einträge kennen nur „chat“ (alles ein Gespräch)."""
+    if j.get("mode") != "sync":
+        return 1
+    return max(int(j.get("group") or (len(j["prompts"]) if j.get("chat") else 1)), 1)
+
+
+def talk_safe(text):
+    """Text für den Gesprächsverlauf vorbereiten. Eine Zeile nur aus --- würde im Formular die Prompts trennen (daraus
+    wird ***, in Markdown dieselbe Trennlinie), und Zeilen, die wie eine Marke aussehen, bekommen einen Rückstrich.
+    Ein zweites Anwenden ändert nichts mehr."""
+    text = re.sub(r"^[^\S\n]*---[^\S\n]*$", "***", text.strip(), flags=re.M)
+    return TALK_MARK.sub(lambda m: "\\" + m.group(0).strip(), text)
+
+
+def conversation_text(turns, new_prompt=""):
+    """Gesprächsverlauf als Text, der einem neuen Prompt vorangestellt wird: je Runde mein früherer Prompt und deine
+    Antwort dazu (turns = [(Prompt, Antwort), …]), darunter Platz für den neuen Prompt."""
+    lines = [TALK_INTRO, "", TALK_BEGIN]
+    for n, (prompt, answer) in enumerate(turns, 1):
+        lines += ["", TALK_MINE.format(n=n), talk_safe(prompt), "", TALK_YOURS.format(n=n), talk_safe(answer)]
+    return "\n".join(lines + ["", TALK_END, "", TALK_NEW, new_prompt])
+
+
+def parse_conversation(text):
+    """Gegenstück zu conversation_text(): ([(Prompt, Antwort), …], neuer Prompt), wenn text einen Gesprächsverlauf
+    enthält, sonst ([], text). Ist der Aufbau durcheinander (z. B. von Hand bearbeitet), gilt text als gewöhnlicher Prompt."""
+    after = {"begin": ("mine",), "mine": ("yours",), "yours": ("mine", "end"), "end": ("new",)}
+    turns, prompt, state, pos, end = [], "", None, 0, None
+    for m in TALK_MARK.finditer(text):
+        kind, chunk = m.lastgroup, text[pos:m.start()].strip()
+        if state is None:
+            if kind != "begin":  # vor dem Beginn steht nur die Einleitung
+                continue
+        elif kind not in after.get(state, ()):
+            return [], text
+        if state == "mine":
+            prompt = chunk
+        elif state == "yours":
+            turns.append((prompt, chunk))
+        state, pos = kind, m.end()
+        if kind == "end":
+            end = pos
+        elif kind == "new":
+            return turns, text[pos:].strip()
+    if turns and end is not None:  # Marke für den neuen Prompt gelöscht: der Rest zählt als neuer Prompt
+        return turns, text[end:].strip()
+    return [], text
+
+
+def history_turns(j, rows, key):
+    """Gesprächsverlauf bis einschließlich der Antwort zu key als [(Prompt, Antwort), …], oder None, wenn er sich nicht
+    bilden lässt (eine Antwort fehlt). Bei synchronen Gesprächen gehören die früheren Runden desselben Gesprächs dazu.
+    Beginnt der erste Prompt selbst mit einem Verlauf (frühere Fortsetzung), wird dieser davor eingereiht statt
+    verschachtelt: Bei jeder Fortsetzung wächst der Verlauf um genau eine Runde."""
+    keys, group = list(j["prompts"]), entry_group(j)
+    if key not in keys:
+        return None
+    last = keys.index(key)
+    done, turns = {r["key"]: r for r in rows}, []
+    for k in keys[last // group * group:last + 1]:
+        r = done.get(k)
+        if not r or not r.get("text"):
+            return None
+        turns.append((r.get("prompt") or j["prompts"].get(k, ""), r["text"]))
+    earlier, own = parse_conversation(turns[0][0])
+    if earlier:
+        turns[0] = (own, turns[0][1])
+    return earlier + turns
+
+
+def short_prompt(prompt, n=90):
+    """Anfang eines Prompts für Überschriften. Setzt er ein früheres Gespräch fort, zählt der neue Prompt (mit ↪)."""
+    turns, own = parse_conversation(prompt)
+    return "↪ " + own[:n] if turns else prompt[:n]
+
+
 # ---------- Anzeige (läuft als Fragment, siehe Tab „Jobs und Ergebnisse“) ----------
+def show_text(text):
+    """Text im Wortlaut zeigen (festbreit, mit Kopierknopf). Lange Texte scrollen in einem eigenen Rahmen."""
+    box = st.container(height=400) if len(text) > 3000 else st.container()
+    box.code(text, language=None, wrap_lines=True)
+
+
+def show_prompt(prompt):
+    """Einen gesendeten Prompt im Wortlaut zeigen, mit Hinweis, wenn er ein früheres Gespräch fortsetzt."""
+    turns, _ = parse_conversation(prompt)
+    if turns:
+        st.caption(f"Setzt ein früheres Gespräch fort: Der Prompt enthält den Verlauf von {len(turns)} Runde(n) "
+                   "vor dem neuen Prompt.")
+    show_text(prompt)
+
+
+def request_details(j):
+    """Die gesendete Anfrage eines Eintrags im Wortlaut: PDFs, Systemanweisung und jeder Prompt. Funktioniert auch,
+    solange noch keine Ergebnisse da sind."""
+    pdfs = j.get("pdfs") or ([j["pdf"]] if j.get("pdf") else [])
+    st.markdown("**PDFs** (Reihenfolge in jeder Anfrage): "
+                + (", ".join(f"{k}. {n}" for k, n in enumerate(pdfs, 1)) if pdfs else "keine"))
+    st.markdown("**Systemanweisung**")
+    if j.get("system"):
+        show_text(j["system"])
+    else:
+        st.caption("Keine Systemanweisung.")
+    group = entry_group(j)
+    for n, (key, prompt) in enumerate(j["prompts"].items()):
+        where = f" (Gespräch {n // group + 1}, Runde {n % group + 1})" if group > 1 else ""
+        st.markdown(f"**{key}**{where}")
+        show_prompt(prompt)
+
+
+def talk_tools(j, rows, r):
+    """Unter einer Antwort: „Gespräch fortsetzen“ übernimmt den Verlauf als Text ins Formular, „Verlaufstext zeigen“
+    zeigt ihn zum Kopieren. Ohne Antwort (Fehler) gibt es nichts fortzusetzen."""
+    turns = history_turns(j, rows, r["key"])
+    if not turns:
+        return
+    tag = f"{j['name']}:{r['key']}"
+    c1, c2, _ = st.columns([1, 1, 2])
+    if c1.button("Gespräch fortsetzen", key="talk:" + tag, on_click=continue_conversation, args=(j, turns),
+                 help="Übernimmt den bisherigen Verlauf (früherer Prompt und deine Antwort dazu) als Text ins "
+                      f"Formular „Neue Anfrage“. Dort schreibst du unter „{TALK_NEW}“ den nächsten Prompt."):
+        st.rerun()  # Fragmentläufe ändern nur das Fragment: ein voller Rerun zeigt das gefüllte Formular
+    show = c2.toggle("Verlaufstext zeigen", key="hist:" + tag, help="Der Verlauf als Text, wie er im Formular landet.")
+    if show:
+        text = conversation_text(turns)
+        st.caption(f"Verlauf aus {len(turns)} Runde(n), {len(text):,} Zeichen. Der Text lässt sich mit dem Symbol "
+                   "rechts oben in der Textbox kopieren.")
+        show_text(text)
+
+
 def show_rows(j, rows):
     if not rows:
         return
@@ -384,7 +531,10 @@ def show_rows(j, rows):
     md = "\n\n".join(f"## {r['key']}\n\n**Prompt:** {r['prompt']}\n\n{r['text'] or r['error']}" for r in rows)
     st.download_button("Ergebnisse als Markdown", md, file_name=f"{j['label']}.md", key="dl:" + j["name"])
     for r in rows:
-        with st.expander(f"{r['key']}: {r['prompt'][:90]}", expanded=len(rows) <= 3):
+        with st.expander(f"{r['key']}: {short_prompt(r['prompt'])}", expanded=len(rows) <= 3):
+            if st.toggle("Prompt im Wortlaut", key=f"prompt:{j['name']}:{r['key']}",
+                         help="Zeigt den vollständigen Prompt, so wie er gesendet wurde."):
+                show_prompt(r["prompt"])
             if r["text"]:
                 st.markdown(r["text"])
             else:
@@ -400,6 +550,7 @@ def show_rows(j, rows):
                        + (f", Dauer {r['secs']} s" if r.get("secs") is not None else ""))
             if r.get("usage"):
                 st.json(r["usage"], expanded=False)
+            talk_tools(j, rows, r)
 
 
 def sync_panel(rt, name, polling):
@@ -431,6 +582,9 @@ def sync_panel(rt, name, polling):
 
 def job_panel(client, rt, j, polling):
     """Status und Ergebnisse. Mit polling=True prüft das Fragment alle POLL_SECONDS Sekunden neu."""
+    if st.toggle("Gesendete Anfrage im Detail", key="detail:" + j["name"],
+                 help="PDFs, Systemanweisung und jeden Prompt im Wortlaut, auch solange noch keine Ergebnisse da sind."):
+        request_details(j)
     if j.get("mode") == "sync":
         return sync_panel(rt, j["name"], polling)
     name = j["name"]
@@ -475,11 +629,13 @@ def entry_label(x):
     return f"{x['label']} ({x['created'][:16].replace('T', ' ')}) {x['name'][-6:]}"
 
 
-def reuse_inputs(j):
-    """Callback: Prompts und Einstellungen eines Eintrags ins Formular „Neue Anfrage“ übernehmen."""
+def fill_form(j, raw, group, text):
+    """Callback-Hilfe: Formular „Neue Anfrage“ mit dem Prompt-Text raw und den Einstellungen eines Eintrags füllen
+    und zu dem Tab wechseln. text beginnt den einmaligen Hinweis. Nur aus Callbacks aufrufen (Widget-Werte lassen
+    sich nur setzen, bevor das Widget im Lauf erzeugt wurde)."""
     ss, is_sync = st.session_state, j.get("mode") == "sync"
     ss["mode"] = MODE_SYNC if is_sync else MODE_BATCH
-    ss["raw"] = "\n---\n".join(j["prompts"].values())
+    ss["raw"] = raw
     ss["system"] = j.get("system", "")
     if j.get("think") in THINK_LEVELS:
         ss["think"] = j["think"]
@@ -487,13 +643,26 @@ def reuse_inputs(j):
         cap = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT) if is_sync else BATCH_MAX_OUT
         ss["max_sync" if is_sync else "max_batch"] = max(256, min(int(j["max_out"]), cap))
     if is_sync:
-        ss["group"] = min(max(int(j.get("group") or 1), 1), 50)
+        ss["group"] = min(max(int(group or 1), 1), 50)
     pdfs = j.get("pdf")
-    note = f"Eingaben aus „{j['label']}“ übernommen."
+    note = text
     if pdfs:
         note += f" Bitte die PDFs erneut anhängen: {pdfs}. Schon hochgeladene Dateien werden wiederverwendet."
     ss["reused_note"] = note
     ss["view"] = TABS[0]  # wechselt zum Tab „Neue Anfrage“ (ab Streamlit 1.55)
+
+
+def reuse_inputs(j):
+    """Callback: Prompts und Einstellungen eines Eintrags ins Formular „Neue Anfrage“ übernehmen."""
+    fill_form(j, "\n---\n".join(j["prompts"].values()), j.get("group"), f"Eingaben aus „{j['label']}“ übernommen.")
+
+
+def continue_conversation(j, turns):
+    """Callback: Gesprächsverlauf (turns, siehe history_turns) als Text ins Formular übernehmen. Darunter schreibt man
+    den neuen Prompt. Der Verlauf steckt im Prompt selbst, deshalb „Prompts pro Gespräch“ = 1."""
+    fill_form(j, conversation_text(turns), 1,
+              f"Gespräch aus „{j['label']}“ fortgesetzt: {len(turns)} Runde(n) Verlauf stehen im Prompt. "
+              f"Schreibe deinen neuen Prompt unter „{TALK_NEW}“.")
 
 
 def delete_entry(name):
@@ -559,7 +728,15 @@ with tab_new:
 
     system = st.text_area("Systemanweisung (optional)", height=80, key="system")
     raw = st.text_area("Prompts (mehrere mit einer Zeile --- trennen)", height=260, key="raw")
-    prompts = [p.strip() for p in re.split(r"^\s*---\s*$", raw, flags=re.M) if p.strip()]
+    prompts = [p.strip() for p in SEPARATOR.split(raw) if p.strip()]
+    talks = [parse_conversation(p) for p in prompts]  # Prompts, die ein früheres Gespräch fortsetzen
+    unfinished = [k for k, (turns, own) in enumerate(talks, 1) if turns and not own]
+    if any(turns for turns, _ in talks):
+        st.caption(f"{sum(1 for turns, _ in talks if turns)} von {len(prompts)} Prompt(s) setzen ein früheres Gespräch "
+                   "fort. Der Verlauf steht im Prompt und zählt bei jeder Anfrage als Eingabe.")
+    if unfinished:
+        st.warning(f"Unter „{TALK_NEW}“ fehlt noch dein neuer Prompt (Prompt {', '.join(map(str, unfinished))}). "
+                   "Der Start ist gesperrt, bis dort Text steht.")
     group = 1
     if sync:
         gcol, _ = st.columns([1, 3])
@@ -612,7 +789,8 @@ with tab_new:
             "Stelle, damit der Prefix identisch ist. Treffer siehst du unter „Jobs und Ergebnisse“."
         )
 
-    if st.button("Synchron starten" if sync else "Batch starten", type="primary", disabled=not prompts):
+    if st.button("Synchron starten" if sync else "Batch starten", type="primary",
+                 disabled=not prompts or bool(unfinished)):
         try:
             with st.status("Bereite Anfragen vor …" + HINT) as status:
                 files = [(f.name, f.getvalue()) for f in uploads]
@@ -659,7 +837,7 @@ with tab_jobs:
             st.session_state.pop("sel", None)
         j = opts[st.selectbox("Eintrag", list(opts), key="sel")]
         is_sync = j.get("mode") == "sync"
-        grp = j.get("group") or (len(j["prompts"]) if j.get("chat") else 1)
+        grp = entry_group(j)
         kind_txt = (f"synchron, {grp} Prompts pro Gespräch" if grp > 1 else "synchron") if is_sync else "Batch"
         st.caption(f"{j['name']}, {kind_txt}, gesendet: Modell {j['model']}, "
                    f"Denktiefe {j.get('think', 'unbekannt')}, max. {j.get('max_out', '?')} Ausgabe-Token, "

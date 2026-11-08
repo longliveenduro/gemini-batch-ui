@@ -313,3 +313,146 @@ def test_ask_gives_up_after_three_attempts(app, fake_time):
     with pytest.raises(ApiError):
         app.ask(fake, "m", [], None)
     assert fake_time.sleeps == [10, 20] and len(fake.calls) == 3
+
+
+# ---------- Gesprächsverlauf als Text ----------
+TURNS = [("Frage eins", "Antwort eins"), ("Frage zwei", "Antwort zwei")]
+
+
+def talk_entry(count, group=1, mode="sync", **extra):
+    prompts = {f"prompt-{i}": f"P{i}" for i in range(1, count + 1)}
+    return {"name": "e", "mode": mode, "prompts": prompts, "group": group, **extra}
+
+
+def talk_rows(entry, skip=()):
+    """Je Prompt eine Zeile mit der Antwort „A<Nummer>“."""
+    return [{"key": k, "prompt": p, "text": f"A{k.rsplit('-', 1)[1]}", "error": None}
+            for k, p in entry["prompts"].items() if k not in skip]
+
+
+def test_entry_group_reads_group_or_the_old_chat_flag(app):
+    sync = {"mode": "sync", "prompts": {"prompt-1": "a", "prompt-2": "b", "prompt-3": "c"}}
+    assert app.entry_group(sync) == 1
+    assert app.entry_group({**sync, "group": 2}) == 2
+    assert app.entry_group({**sync, "chat": True}) == 3  # ältere Einträge: der ganze Lauf ist ein Gespräch
+    assert app.entry_group({**sync, "mode": None, "group": 2}) == 1  # Batches kennen keine Gespräche
+
+
+def test_conversation_text_lists_each_round_with_my_prompt_and_your_answer(app):
+    text = app.conversation_text(TURNS, "Neu?")
+    assert text.startswith(app.TALK_INTRO)
+    order = [app.TALK_BEGIN, "[Runde 1: Mein Prompt]", "Frage eins", "[Runde 1: Deine Antwort dazu]", "Antwort eins",
+             "[Runde 2: Mein Prompt]", "Frage zwei", "[Runde 2: Deine Antwort dazu]", "Antwort zwei",
+             app.TALK_END, app.TALK_NEW, "Neu?"]
+    positions = [text.index(part) for part in order]
+    assert positions == sorted(positions)
+    assert app.conversation_text(TURNS).endswith(app.TALK_NEW + "\n")  # darunter ist Platz für den neuen Prompt
+
+
+def test_every_mark_constant_is_recognized_by_the_mark_pattern(app):
+    marks = {"begin": app.TALK_BEGIN, "mine": app.TALK_MINE.format(n=7), "yours": app.TALK_YOURS.format(n=7),
+             "end": app.TALK_END, "new": app.TALK_NEW}
+    for kind, mark in marks.items():
+        found = app.TALK_MARK.fullmatch(mark)
+        assert found and found.lastgroup == kind, kind
+
+
+def test_parse_conversation_reads_back_what_conversation_text_wrote(app):
+    assert app.parse_conversation(app.conversation_text(TURNS, "Neuer\nPrompt")) == (TURNS, "Neuer\nPrompt")
+    assert app.parse_conversation(app.conversation_text(TURNS)) == (TURNS, "")  # noch kein neuer Prompt
+
+
+def test_parse_conversation_leaves_a_plain_prompt_alone(app):
+    for text in ["Ein ganz normaler Prompt\nüber zwei Zeilen", "", "Er erwähnt [Mein neuer Prompt] mitten im Satz"]:
+        assert app.parse_conversation(text) == ([], text)
+
+
+def test_parse_conversation_takes_the_rest_as_new_prompt_when_its_mark_was_deleted(app):
+    text = app.conversation_text(TURNS, "Neu?").replace(app.TALK_NEW + "\n", "")
+    assert app.parse_conversation(text) == (TURNS, "Neu?")
+
+
+@pytest.mark.parametrize("deleted", ["[Runde 1: Deine Antwort dazu]", "[Ende des bisherigen Gesprächsverlaufs]",
+                                     "[Bisheriger Gesprächsverlauf]"])
+def test_parse_conversation_gives_up_on_a_damaged_structure(app, deleted):
+    text = app.conversation_text(TURNS, "Neu?").replace(deleted, "")
+    assert app.parse_conversation(text) == ([], text)  # zählt als gewöhnlicher Prompt
+
+
+def test_separator_lines_in_a_text_never_split_the_prompts(app):
+    answer = "Oben\n---\nMitte\n  ---  \nUnten\r\n---\r\nEnde"
+    text = app.conversation_text([("Frage", answer)], "Neu")
+    assert not app.SEPARATOR.search(text) and len(app.SEPARATOR.split(text)) == 1
+    assert app.parse_conversation(text)[0][0][1].count("***") == 3  # Markdown liest *** wie ---
+
+
+def test_talk_safe_touches_only_lone_separator_lines_and_mark_lookalikes(app):
+    text = "a --- b\n----\n|---|---|\n---\n[Mein neuer Prompt]\n   [Runde 3: Mein Prompt]  \nok"
+    safe = app.talk_safe(text)
+    assert safe.splitlines() == ["a --- b", "----", "|---|---|", "***", r"\[Mein neuer Prompt]",
+                                 r"\[Runde 3: Mein Prompt]", "ok"]
+    assert app.talk_safe(safe) == safe  # ein zweites Mal ändert sich nichts
+
+
+def test_marks_inside_an_answer_cannot_break_the_structure(app):
+    tricky = "Text\n[Runde 1: Mein Prompt]\nmehr\n[Ende des bisherigen Gesprächsverlaufs]\nEnde"
+    turns = [("Frage", tricky), ("Zwei", "Antwort zwei")]
+    parsed, new = app.parse_conversation(app.conversation_text(turns, "Neu"))
+    assert new == "Neu" and len(parsed) == 2 and parsed[1] == ("Zwei", "Antwort zwei")
+    assert parsed[0][0] == "Frage" and r"\[Runde 1: Mein Prompt]" in parsed[0][1]
+    assert app.conversation_text(parsed, "Neu") == app.conversation_text(turns, "Neu")  # stabil beim Wiederholen
+
+
+def test_history_turns_of_a_batch_or_single_prompt_is_that_one_round(app):
+    for entry in (talk_entry(3, mode="batch"), talk_entry(3, group=1)):
+        assert app.history_turns(entry, talk_rows(entry), "prompt-2") == [("P2", "A2")]
+
+
+def test_history_turns_includes_the_earlier_rounds_of_the_same_conversation(app):
+    entry = talk_entry(4, group=2)
+    rows = talk_rows(entry)
+    assert app.history_turns(entry, rows, "prompt-1") == [("P1", "A1")]
+    assert app.history_turns(entry, rows, "prompt-2") == [("P1", "A1"), ("P2", "A2")]
+    assert app.history_turns(entry, rows, "prompt-3") == [("P3", "A3")]  # neues Gespräch
+    assert app.history_turns(entry, rows, "prompt-4") == [("P3", "A3"), ("P4", "A4")]
+
+
+def test_history_turns_of_an_old_chat_entry_is_the_whole_run(app):
+    entry = {"name": "e", "mode": "sync", "chat": True, "prompts": {"prompt-1": "P1", "prompt-2": "P2", "prompt-3": "P3"}}
+    assert app.history_turns(entry, talk_rows(entry), "prompt-3") == [("P1", "A1"), ("P2", "A2"), ("P3", "A3")]
+
+
+def test_history_turns_needs_every_answer_of_the_conversation(app):
+    entry = talk_entry(2, group=2)
+    assert app.history_turns(entry, talk_rows(entry, skip=["prompt-1"]), "prompt-2") is None
+    assert app.history_turns(entry, [{**talk_rows(entry)[0], "text": ""}], "prompt-1") is None  # Fehler statt Antwort
+    assert app.history_turns(entry, talk_rows(entry), "prompt-9") is None
+
+
+def test_history_turns_falls_back_to_the_stored_prompt_when_a_row_lacks_it(app):
+    entry = talk_entry(1)
+    assert app.history_turns(entry, [{"key": "prompt-1", "text": "A1"}], "prompt-1") == [("P1", "A1")]
+
+
+def test_a_continued_conversation_grows_by_one_round_each_time_without_nesting(app):
+    entry = talk_entry(1)
+    turns = app.history_turns(entry, talk_rows(entry), "prompt-1")  # [("P1", "A1")]
+    for follow_up in ("Zwei", "Drei", "Vier"):
+        sent = app.conversation_text(turns, follow_up)  # so geht die Fortsetzung hinaus
+        entry = {**talk_entry(1), "prompts": {"prompt-1": sent}}
+        turns = app.history_turns(entry, [{"key": "prompt-1", "prompt": sent, "text": f"A-{follow_up}"}], "prompt-1")
+        assert sent.count(app.TALK_BEGIN) == 1
+    assert turns == [("P1", "A1"), ("Zwei", "A-Zwei"), ("Drei", "A-Drei"), ("Vier", "A-Vier")]
+
+
+def test_a_continuation_inside_a_synchronous_conversation_flattens_only_the_first_prompt(app):
+    sent = app.conversation_text([("Alt", "Alte Antwort")], "Neu")
+    entry = {"name": "e", "mode": "sync", "group": 2, "prompts": {"prompt-1": sent, "prompt-2": "Nachfrage"}}
+    rows = [{"key": "prompt-1", "prompt": sent, "text": "A1"}, {"key": "prompt-2", "prompt": "Nachfrage", "text": "A2"}]
+    assert app.history_turns(entry, rows, "prompt-2") == [("Alt", "Alte Antwort"), ("Neu", "A1"), ("Nachfrage", "A2")]
+
+
+def test_short_prompt_shows_the_new_part_of_a_continuation(app):
+    assert app.short_prompt("x" * 200) == "x" * 90
+    short = app.short_prompt(app.conversation_text(TURNS, "Neue Frage " + "y" * 200))
+    assert short.startswith("↪ Neue Frage ") and len(short) == len("↪ ") + 90
