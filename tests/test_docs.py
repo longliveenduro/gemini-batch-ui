@@ -12,8 +12,8 @@ TESTS_SOURCE = "\n".join(p.read_text("utf-8") for p in TEST_FILES)
 EXTERNAL_FUNCTIONS = {"generate_content", "create", "count_tokens", "model_dump", "exec", "get", "setdefault", "tabs",
                       "fragment", "rerun", "run", "set_value", "from_file", "getattr", "compile", "split", "join",
                       "resolve", "mkdir", "read_text", "write_text", "glob", "upload", "download", "cancel"}
-EXTERNAL_CONSTANTS = {"GEMINI_API_KEY", "GEMINI_UI_HOME", "MAX_TOKENS", "STOP", "SAFETY", "RUNNING", "DONE", "FAILED",
-                      "CANCELLED", "INTERRUPTED", "PENDING", "STREAMLIT_LOGGER_LEVEL"}
+EXTERNAL_CONSTANTS = {"GEMINI_API_KEY", "OPENAI_API_KEY", "GEMINI_UI_HOME", "MAX_TOKENS", "STOP", "SAFETY", "RUNNING",
+                      "DONE", "FAILED", "CANCELLED", "INTERRUPTED", "PENDING", "STREAMLIT_LOGGER_LEVEL"}
 
 
 def defined_functions(source):

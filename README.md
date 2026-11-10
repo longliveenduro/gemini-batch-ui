@@ -1,11 +1,11 @@
 # Gemini 4 Argon: Batch- und Synchron-UI
 
-Lokale Streamlit-Oberfläche, um **Gemini 4 Argon** (`gemini-4-argon`) mit **einem oder mehreren PDFs** und **vielen Prompts** zu benutzen. Es gibt zwei Betriebsarten:
+Lokale Streamlit-Oberfläche, um **Gemini 4 Argon** (`gemini-4-argon`) oder ein **OpenAI-Modell** (z. B. `gpt-6-astra`) mit **einem oder mehreren PDFs** und **vielen Prompts** zu benutzen. Es gibt zwei Betriebsarten:
 
-- **Batch**: asynchron, 50 % des Standardpreises, Ergebnis nach Minuten bis Stunden.
-- **Synchron**: Prompts laufen nacheinander im Hintergrund, mit Aussicht auf Cache-Treffer für das PDF. Optional bilden je N Prompts ein Gespräch (gemeinsamer Kontext).
+- **Batch** (Gemini und OpenAI): asynchron, 50 % des Standardpreises, Ergebnis nach Minuten bis Stunden (bei OpenAI innerhalb von 24 Stunden).
+- **Synchron** (nur Gemini): Prompts laufen nacheinander im Hintergrund, mit Aussicht auf Cache-Treffer für das PDF. Optional bilden je N Prompts ein Gespräch (gemeinsamer Kontext).
 
-Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
+Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Die Aussagen zur OpenAI-Anbindung beruhen auf der OpenAI-Dokumentation vom 10.11.2026 (openai 3.46). Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
 
 ## Inhalt
 
@@ -42,17 +42,18 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34,
 
 ## 2. Funktionen im Überblick
 
-- Zwei Modi: **Batch** und **Synchron**.
+- Zwei Anbieter: **Gemini** (Batch und Synchron) und **OpenAI** (nur Batch, Endpunkt `/v1/responses`). Der Anbieter für neue Anfragen steht in der Seitenleiste, jeder Verlaufseintrag merkt sich seinen eigenen.
+- Zwei Modi: **Batch** und **Synchron** (synchron nur mit Gemini).
 - **Mehrere PDFs** pro Anfrage: Datei-Upload (mehrfach), Auswahl aus Google Drive (Liste der 50 zuletzt geänderten PDFs, mehrfach wählbar) und/oder eingefügte Drive-Links oder Datei-IDs (eine pro Zeile). Google Docs/Slides aus Drive werden als PDF exportiert. Gleiche Dateien werden nur einmal gesendet.
 - **Mehrere Prompts**, getrennt durch eine Zeile mit `---`. Optional **Systemanweisung**.
-- **Denktiefe** (`low`, `medium`, `high`, oder „Standard“ = nichts senden) und **max. Ausgabe-Token**.
+- **Denktiefe** (Gemini: `low`, `medium`, `high`. OpenAI: `none` bis `max`. Jeweils „Standard“ = nichts senden) und **max. Ausgabe-Token**.
 - **Gespräche (nur synchron)**: „Prompts pro Gespräch“ = N. Je N aufeinanderfolgende Prompts teilen einen Kontext, das nächste Gespräch beginnt neu.
 - **Jobs und Ergebnisse**: Verlauf aller Läufe, automatische Statusprüfung alle 10 Sekunden solange der Tab offen ist, Ergebnisse mit Token- und Cache-Angaben, Markdown-Download, Rohdaten-JSON.
 - **Lokale Sicherung** der Ergebnisse (`data/batch_jobs.json`), auch nach Ablauf der Aufbewahrung bei Google.
 - **Eingaben übernehmen**: Prompts und Einstellungen eines früheren Eintrags zurück ins Formular holen. **Eintrag löschen** (nur lokal).
 - **Prompts im Wortlaut**: Im Tab „Jobs und Ergebnisse“ zeigt ein Klick die gesendete Anfrage im Detail (PDFs, Systemanweisung, jeder Prompt, auch solange ein Batch noch keine Ergebnisse hat) und je Ergebnis den vollständigen Prompt.
 - **Gespräch fortsetzen**: Zu jeder Antwort erzeugt die App auf Klick den bisherigen Gesprächsverlauf als Text (früherer Prompt und deine Antwort dazu, bei synchronen Gesprächen alle Runden) und legt ihn ins Formular „Neue Anfrage“. Darunter schreibt man den neuen Prompt. Das geht beliebig oft hintereinander, der Verlauf wächst dabei nur um eine Runde.
-- **Wiederverwendung hochgeladener PDFs** über Neustarts hinweg (`data/pdf_files.json`), damit die Datei-Referenz gleich bleibt.
+- **Wiederverwendung hochgeladener PDFs** über Neustarts hinweg (`data/pdf_files.json` bei Gemini, `data/openai_files.json` bei OpenAI), damit die Datei-Referenz gleich bleibt.
 - **Drive-Anmeldung erneuert sich selbst**, wenn die Freigabe abgelaufen ist.
 - **Aufgeräumte Ordner**: Zugangsdaten in `conf/`, erzeugte Daten in `data/`. Dateien eines älteren Stands werden beim Start dorthin übernommen.
 
@@ -61,7 +62,7 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34,
 **Voraussetzungen**
 
 - Python 3.12 (vom Besitzer genutzt). Streamlit und google-genai verlangen derzeit mindestens Python 3.11.
-- Ein Gemini-API-Key (in Google AI Studio erzeugen).
+- Ein API-Key für den Anbieter, den man nutzt: Gemini (in Google AI Studio erzeugen) und/oder OpenAI (auf der OpenAI-Plattform erzeugen).
 - Optional für Drive: OAuth-Zugang, siehe 6.4.
 
 **Installation** (am besten in einer eigenen Umgebung, damit andere Pakete unberührt bleiben):
@@ -79,6 +80,7 @@ Für die Tests zusätzlich `pip install -r requirements-dev.txt` (Abschnitt 9.3)
 ```text
 streamlit>=1.55
 google-genai>=2.30.1
+openai>=1.100.0
 google-api-python-client
 google-auth-oauthlib
 ```
@@ -89,6 +91,7 @@ Kein `pip install -U -r ...` in einer gemeinsam genutzten Umgebung (z. B. Anacon
 
 ```bash
 export GEMINI_API_KEY="dein-key"      # optional, sonst in der Seitenleiste eintragen
+export OPENAI_API_KEY="dein-key"      # optional, für den Anbieter OpenAI
 streamlit run src/gemini_batch_ui.py  # im Projektordner ausführen, öffnet http://localhost:8501
 ```
 
@@ -96,24 +99,32 @@ Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden
 
 **Erster Lauf in 60 Sekunden**
 
-1. Seitenleiste: API-Key prüfen, Modell `gemini-4-argon`.
-2. Tab „Neue Anfrage“: Modus wählen, PDF hochladen, Prompts eintragen (mehrere mit `---` auf eigener Zeile trennen).
+1. Seitenleiste: Anbieter wählen (Gemini oder OpenAI), API-Key prüfen, Modell (`gemini-4-argon` bzw. `gpt-6-astra`).
+2. Tab „Neue Anfrage“: Modus wählen (nur bei Gemini), PDF hochladen, Prompts eintragen (mehrere mit `---` auf eigener Zeile trennen).
 3. „Batch starten“ oder „Synchron starten“. Der neue Eintrag ist danach im Tab „Jobs und Ergebnisse“ vorausgewählt.
 
 ## 4. Bedienung
+
+### Seitenleiste
+
+| Element | Bedeutung |
+|---|---|
+| Anbieter für neue Anfragen | `Gemini` (Voreinstellung) oder `OpenAI`. Das Formular „Neue Anfrage“ passt sich an: Mit OpenAI entfallen der Modus (es gibt nur Batch) und „Prompts pro Gespräch“, und die Denktiefe kennt die Stufen von OpenAI. Einträge im Tab „Jobs und Ergebnisse“ werden unabhängig von dieser Wahl mit dem Anbieter und dem Key abgefragt, zu denen sie gehören. Beim Hin- und Herwechseln merkt sich die App die Werte beider Anbieter (Modell, Denktiefe, Token-Limit), Prompts und Systemanweisung gelten für beide. |
+| Gemini API-Key, OpenAI API-Key | Vorbelegt aus `GEMINI_API_KEY` bzw. `OPENAI_API_KEY`, beide dürfen eingetragen bleiben. Fehlt der Key des gewählten Anbieters, bleibt die App stehen und sagt es. Fehlt der Key des Anbieters eines Verlaufseintrags, sind dort „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“ gesperrt, gesicherte Ergebnisse bleiben sichtbar. |
+| Modell | Freitext, je Anbieter ein eigenes Feld (Voreinstellung `gemini-4-argon` bzw. `gpt-6-astra`). Bei OpenAI muss das Modell die Batch API und PDF-Eingaben unterstützen. |
 
 ### Tab „Neue Anfrage“
 
 | Element | Bedeutung |
 |---|---|
-| Modus | Batch (asynchron, günstiger) oder Synchron (nacheinander im Hintergrund). |
+| Modus | Batch (asynchron, günstiger) oder Synchron (nacheinander im Hintergrund). Mit OpenAI gibt es nur Batch, der Schalter entfällt. |
 | PDF-Dateien | Mehrere Dateien möglich. Ein zweites PDF ersetzt das erste nicht. |
 | PDFs aus Google Drive | Button „Meine PDFs aus Drive laden“ füllt die Mehrfachauswahl. Zusätzlich Links oder Datei-IDs einfügen. Reihenfolge: hochgeladene Dateien, dann Drive-Auswahl, dann eingefügte Links. Die Reihenfolge steht als Hinweis unter dem Bereich. |
 | Systemanweisung | Optional, gilt für jede Anfrage. |
 | Prompts | Ein Textfeld, mehrere Prompts durch eine Zeile nur mit `---` trennen. Beginnt ein Prompt mit einem Gesprächsverlauf (aus „Gespräch fortsetzen“), steht der neue Prompt unter `[Mein neuer Prompt]`. Solange dort nichts steht, ist der Start gesperrt. |
 | Prompts pro Gespräch | Nur synchron. 1 = jeder Prompt für sich. 2 = je zwei Prompts bilden ein Gespräch (der zweite sieht den ersten und dessen Antwort), die nächsten zwei ein neues usw. Das PDF geht in jedem Gespräch mit dem ersten Prompt raus. |
-| Denktiefe | „Standard“ (kein Parameter, Argon nutzt dann `medium`), `low`, `medium`, `high`. Voreinstellung `high`. |
-| Max. Ausgabe-Token | Batch: bis 32.768 (Voreinstellung 32.768). Synchron: bis 1.048.576 (Voreinstellung 65.536), über 32.768 setzt das SDK automatisch Long Decode ein. Denk-Token zählen zum Limit. |
+| Denktiefe | Gemini: „Standard“ (kein Parameter, Argon nutzt dann `medium`), `low`, `medium`, `high`. Voreinstellung `high`. OpenAI: „Standard“ (kein Parameter, es gilt die Voreinstellung des Modells), `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Voreinstellung „Standard“. Welche Stufen ein Modell kennt, hängt vom Modell ab (z. B. kennt `gpt-6-astra` kein `none`). Die API lehnt andere ab, der Fehler steht dann je Prompt im Ergebnis. |
+| Max. Ausgabe-Token | Gemini-Batch: bis 32.768 (Voreinstellung 32.768). Gemini synchron: bis 1.048.576 (Voreinstellung 65.536), über 32.768 setzt das SDK automatisch Long Decode ein. OpenAI: bis 128.000 (Voreinstellung 32.768), je nach Modell darunter. Denk-Token zählen zum Limit. |
 | Name | Bezeichnung des Eintrags im Verlauf. |
 | Start-Button | Lädt PDFs hoch, sendet bzw. startet. Während dieser Vorbereitung nicht den Tab wechseln, sonst bricht der Start ab. |
 
@@ -122,14 +133,16 @@ Ohne angehängtes PDF werden die Prompts ohne PDF gesendet (steht als Hinweis im
 ### Tab „Jobs und Ergebnisse“
 
 - **Eintrag**: Auswahlliste, neuester Eintrag oben.
-- **Eingaben übernehmen**: füllt „Neue Anfrage“ mit Prompts, Systemanweisung, Modus, Denktiefe, Token-Limit und Gesprächsgröße. PDFs müssen neu angehängt werden, bereits hochgeladene Dateien werden dabei wiederverwendet.
-- **Eintrag löschen** (Bestätigung im Popover): entfernt den lokalen Eintrag samt gesicherter Ergebnisse. Bei Google bleibt alles unverändert. Deaktiviert, solange der Eintrag läuft.
+- **Eingaben übernehmen**: füllt „Neue Anfrage“ mit Prompts, Systemanweisung, Anbieter, Modell, Modus, Denktiefe, Token-Limit und Gesprächsgröße. PDFs müssen neu angehängt werden, bereits hochgeladene Dateien werden dabei wiederverwendet.
+- **Eintrag löschen** (Bestätigung im Popover): entfernt den lokalen Eintrag samt gesicherter Ergebnisse. Beim Anbieter bleibt alles unverändert. Deaktiviert, solange der Eintrag läuft.
 - **Gesendete Anfrage im Detail** (Schalter, standardmäßig aus): zeigt die PDFs in ihrer Reihenfolge, die Systemanweisung und jeden Prompt im Wortlaut, bei synchronen Gesprächen mit Gespräch und Runde. Das geht auch, solange ein Batch noch läuft und es noch keine Ergebnisse gibt.
-- **Batch**: Buttons „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“. Solange der Tab offen und der Batch nicht fertig ist, prüft die App alle 10 Sekunden selbst. Ist der Batch fertig, werden die Ergebnisse geladen und lokal gesichert. Danach braucht ein Öffnen keinen Abruf mehr.
+- **Batch**: Buttons „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“. Solange der Tab offen und der Batch nicht fertig ist, prüft die App alle 10 Sekunden selbst. Ist der Batch fertig, werden die Ergebnisse geladen und lokal gesichert. Danach braucht ein Öffnen keinen Abruf mehr. Bei OpenAI-Einträgen („Batch (OpenAI)“) zeigt die Statuszeile den Status der Batch API (`validating`, `in_progress`, `finalizing`, `completed`, `failed`, `expired`, `cancelling`, `cancelled`). Bei `expired` und `cancelled` lädt die App die bis dahin fertigen Antworten, die übrigen stehen mit Fehlertext in der Liste. Scheitert der ganze Batch (`failed`, z. B. wegen des Token-Limits der Warteschlange), steht der Grund als Fehlermeldung über den Ergebnissen.
 - **Synchron**: Zustand `läuft`, `fertig`, `abgebrochen`, `fehlgeschlagen` oder `unterbrochen`, Fortschritt „n von m Prompts“, Button „Lauf abbrechen“ (greift nach der gerade laufenden Anfrage).
 - **Ergebnisse**: Summenzeile (Eingabe-Token gesamt und davon aus dem Cache), Download „Ergebnisse als Markdown“, pro Prompt ein Ausklappfeld mit Antwort, Warnungen, Detailzeile (Modell, Abschlussgrund, Token, Dauer) und rohen `usage`-Daten als einklappbarem JSON. Die Überschrift zeigt nur die ersten 90 Zeichen des Prompts (bei einer Fortsetzung ein ↪ und den neuen Prompt). Der Schalter „Prompt im Wortlaut“ zeigt den ganzen Prompt. Unter der Antwort stehen „Gespräch fortsetzen“ und der Schalter „Verlaufstext zeigen“.
 
 **Warnungen in den Ergebnissen.** `MAX_TOKENS` bedeutet: Denk- und Ausgabe-Token haben das Limit erreicht, die Antwort ist abgeschnitten. Jeder andere Abschlussgrund außer `STOP` (z. B. `SAFETY`) wird ebenfalls gemeldet.
+
+**Token bei OpenAI.** OpenAI rechnet Denk-Token in `output_tokens` ein. Die App trennt sie, damit die Zeilen beider Anbieter gleich zu lesen sind: „Denken“ = `reasoning_tokens`, „Ausgabe“ = `output_tokens` minus `reasoning_tokens`, „Cache“ = `cached_tokens`. Eine unvollständige Antwort (`incomplete` wegen `max_output_tokens`) erscheint als `MAX_TOKENS`, damit dieselbe Warnung greift, jeder andere Grund (z. B. `content_filter`) steht im Wortlaut der API da.
 
 **Gespräch fortsetzen.** Gemini behält zwischen zwei Anfragen nichts. Wer ein früheres Gespräch weiterführen will, muss es mitsenden. „Gespräch fortsetzen“ (unter jeder Antwort mit Text) macht das in einem Schritt:
 
@@ -181,12 +194,30 @@ Implizites Caching vergleicht den **Anfang (Prefix)** einer Anfrage mit frühere
 
 Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token, Denk-Token 2.188 bis 3.359, Ausgabe-Token 1.133 bis 1.827. **Cache-Token: überall 0.** Das deckt sich mit der Annahme, dass Batch bei Argon keine verlässlichen impliziten Treffer liefert. Ob die API das Feld in Batch-Ergebnissen unter anderem Namen führt, lässt sich im einklappbaren `usage`-JSON jeder Antwort prüfen (die App liest `cachedContentTokenCount`, `cached_content_token_count`, `totalCachedTokens`, `total_cached_tokens`).
 
+### OpenAI-Besonderheiten (laut OpenAI-Doku, Stand 10.11.2026)
+
+| Thema | Verhalten | Folge in der App |
+|---|---|---|
+| Schnittstelle | Die App nutzt nur die Responses API (Batch-Endpunkt `/v1/responses`). Sie nimmt `reasoning` und PDFs als `file_id` entgegen | `OPENAI_ENDPOINT` |
+| Batch | JSONL-Datei mit Zeilen `{"custom_id", "method", "url", "body"}`, 50 % des Standardpreises, Fenster `24h`. Eine Batch-Datei darf nur Anfragen an **ein** Modell enthalten, höchstens 50.000 Anfragen und 200 MB | Batch-Modus, ein Modell je Batch |
+| Warteschlangenlimit | OpenAI begrenzt je Modell und Kontostufe die Summe der Token aller eingereihten Batches. Ein langes PDF zählt in jedem Prompt voll mit. Überschreitet ein Batch das Limit, endet er mit `failed` | Der Fehlertext (typisch `token_limit_exceeded`) steht im Eintrag |
+| PDFs | Files API mit Zweck `user_data`, in der Anfrage als `input_file` mit `file_id`. Pro Datei unter 50 MB, zusammen höchstens 50 MB je Anfrage | `upload_pdf_openai()` |
+| PDF-Token | OpenAI schickt Text **und** Seitenbilder des PDFs ans Modell, das erhöht die Eingabe-Token. `detail` (`auto`, `low`, `high`) steuert die Bildverarbeitung. `auto` bedeutet bei GPT-5.6 und neuer `high`, bei älteren Modellen `low` | `detail` wird nicht gesetzt (Idee in Abschnitt 11) |
+| Denktiefe | `reasoning.effort` mit `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Welche Stufen ein Modell kennt, ist verschieden (`gpt-6-astra` kennt kein `none`) | Auswahl „Denktiefe“ mit allen Stufen, „Standard“ sendet nichts. Die API lehnt unpassende Stufen ab |
+| Denk-Token | zählen zu `max_output_tokens` und sind in `output_tokens` enthalten (`output_tokens_details.reasoning_tokens`) | `parse_openai_line()` trennt sie ab |
+| Caching | automatisch ab 1.024 Token bei gleichem Prefix, ohne Parameter. Bei GPT-5.6 und neuer wird das Schreiben in den Cache gesondert berechnet (`cache_write_tokens` in den Nutzungsdaten) | PDFs ganz vorn. Spalte „Cache“ = `cached_tokens` |
+| Dateien bei OpenAI | `user_data`-Dateien bleiben bis zum Löschen, wenn man keinen Ablauf setzt (mit Ablauf: 1 Stunde bis 30 Tage) | Ablauf nach 3 Tagen (`OPENAI_FILE_TTL`) |
+| Ergebnisse | `output_file_id` (Antworten) und `error_file_id` (fehlgeschlagene Anfragen). Bei `expired` und `cancelled` liegen dort die bis dahin fertigen Antworten und die übrigen Fehler | `fetch_openai_batch()` liest beide Dateien |
+
+Die **Cache-Strategie** (Reihenfolge `[Systemanweisung] [PDF 1] [PDF 2] … [Prompt]`) gilt bei OpenAI genauso: Die Anfragen eines Batches laufen in unbestimmter Reihenfolge und Zeit, ob und wie oft sie Treffer bekommen, ist unbekannt. Die Preise für Eingabe, Cache-Lesen und Cache-Schreiben stehen je Modell auf der OpenAI-Preisseite.
+
 ## 6. Konfiguration
 
 ### 6.1 API-Key und Modell
 
-- Seitenleiste „Gemini API-Key“ (Passwortfeld) oder Umgebungsvariable `GEMINI_API_KEY` (wird als Vorbelegung genutzt). Der Key wird nicht gespeichert.
-- Seitenleiste „Modell“, Voreinstellung `gemini-4-argon`. Andere Modelle sind möglich, aber die App ist auf Argon zugeschnitten (Batch-Limit, `thinking_level`-Werte, Caching-Annahmen).
+- Seitenleiste „Gemini API-Key“ und „OpenAI API-Key“ (Passwortfelder) oder die Umgebungsvariablen `GEMINI_API_KEY` und `OPENAI_API_KEY` (werden als Vorbelegung genutzt). Die Keys werden nicht gespeichert. Gebraucht wird der Key des gewählten Anbieters, dazu der des anderen Anbieters, wenn man dessen Verlaufseinträge abfragen will.
+- Seitenleiste „Anbieter für neue Anfragen“: `Gemini` (Voreinstellung) oder `OpenAI`.
+- Seitenleiste „Modell“, je Anbieter ein eigenes Feld. Gemini, Voreinstellung `gemini-4-argon`: Andere Modelle sind möglich, aber die App ist auf Argon zugeschnitten (Batch-Limit, `thinking_level`-Werte, Caching-Annahmen). OpenAI, Voreinstellung `gpt-6-astra`: Jedes Modell mit Responses API, Batch API und PDF-Eingabe geht, etwa `gpt-6.1-sol` oder `gpt-6-luna` (Namen laut OpenAI-Doku, Stand 10.11.2026).
 - Optional die Umgebungsvariable `GEMINI_UI_HOME`: Ordner, unter dem `conf/` und `data/` liegen. Voreinstellung ist der Projektordner (der Ordner über `src/`), unabhängig vom Arbeitsordner. Nützlich für getrennte Datenbestände und für Tests.
 
 ### 6.2 Konstanten im Code (Kopf von `src/gemini_batch_ui.py`)
@@ -194,22 +225,31 @@ Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token
 | Konstante | Wert | Bedeutung |
 |---|---|---|
 | `DEFAULT_MODEL` | `gemini-4-argon` | Voreinstellung Modell |
+| `DEFAULT_OPENAI_MODEL` | `gpt-6-astra` | Voreinstellung Modell bei OpenAI |
+| `PROVIDER_GEMINI`, `PROVIDER_OPENAI` | „Gemini“, „OpenAI“ | Anbieter. `PROVIDER_OPENAI` steht auch im Feld `provider` der OpenAI-Einträge |
+| `PROVIDERS` | beide Anbieter | Auswahl in der Seitenleiste, Voreinstellung ist der erste |
 | `BASE` | Projektordner: Ordner über `src/` (liegt die Datei in keinem Ordner namens `src`, ihr eigener Ordner), oder `GEMINI_UI_HOME` | Wurzel für `conf/` und `data/` (`_base_dir()`) |
 | `CONF_DIR` | `BASE/conf` | Zugangsdaten, geheim |
 | `DATA_DIR` | `BASE/data` | erzeugte Daten |
 | `CREDENTIALS_FILE`, `TOKEN_FILE` | `conf/credentials.json`, `conf/token.json` | Drive-OAuth-Client und Drive-Login |
 | `HISTORY` | `data/batch_jobs.json` | Verlauf und Ergebnisse |
 | `FILES_DB` | `data/pdf_files.json` | PDF-Hash → Datei in der Gemini Files API |
+| `OPENAI_FILES_DB` | `data/openai_files.json` | PDF-Hash → Datei in der OpenAI Files API |
 | `SCOPES` | `drive.readonly` | Drive-Berechtigung (nur lesen) |
 | `POLL_SECONDS` | `10` | Abstand der automatischen Prüfung |
-| `DONE` | 4 `JOB_STATE_*`-Endzustände | Wann ein Batch als abgeschlossen gilt |
+| `DONE` | 4 `JOB_STATE_*`-Endzustände (Gemini) und `completed`, `failed`, `cancelled`, `expired` (OpenAI) | Wann ein Batch als abgeschlossen gilt |
 | `BATCH_MAX_OUT` | `32768` | Batch-Limit für Ausgabe-Token |
 | `SYNC_MAX_OUT` | `1_048_576` | Obergrenze synchron (Long Decode) |
 | `SYNC_TIMEOUT_MS` | 25 Minuten | HTTP-Timeout pro synchronem Aufruf |
 | `MAX_POLL_ERRORS` | `3` | So viele Abruffehler in Folge stoppen die automatische Prüfung |
 | `TABS` | „Neue Anfrage“, „Jobs und Ergebnisse“ | Tab-Namen (auch Schlüsselwerte für `view`) |
 | `MODE_BATCH`, `MODE_SYNC` | Radio-Texte | Werte des Modus-Schalters |
-| `THINK_LEVELS` | Standard, low, medium, high | Auswahl Denktiefe |
+| `THINK_LEVELS` | Standard, low, medium, high | Auswahl Denktiefe bei Gemini |
+| `OPENAI_EFFORTS` | Standard, none, minimal, low, medium, high, xhigh, max | Auswahl Denktiefe bei OpenAI (die Stufen von `reasoning.effort`) |
+| `OPENAI_ENDPOINT` | `/v1/responses` | Endpunkt der OpenAI Batch API (JSONL-Zeile und `batches.create`) |
+| `OPENAI_MAX_OUT` | `128_000` | Obergrenze für Ausgabe-Token bei OpenAI, je Modell kann sie niedriger sein |
+| `OPENAI_FILE_TTL` | 3 Tage | Ablauf hochgeladener PDFs bei OpenAI (erlaubt sind 1 Stunde bis 30 Tage) |
+| `FORM_KEYS` | Schlüssel der Formularfelder | Werte, die vor jedem Lauf neu zugewiesen werden, damit sie einen Anbieterwechsel überstehen (siehe „Streamlit-Besonderheiten“) |
 | `HINT` | „(bitte den Tab nicht wechseln)“ | Zusatz im Statusfeld beim Start |
 | `SEPARATOR` | Muster: Zeile nur mit `---` | trennt im Formular die Prompts |
 | `TALK_INTRO` | Einleitungssatz | steht über jedem Gesprächsverlauf („Unten steht der bisherige Verlauf …“) |
@@ -217,7 +257,7 @@ Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token
 | `TALK_MINE`, `TALK_YOURS` | `[Runde {n}: Mein Prompt]`, `[Runde {n}: Deine Antwort dazu]` | Marken je Runde |
 | `TALK_MARK` | Muster | erkennt genau diese Marken wieder (`parse_conversation()`) |
 
-Weitere Voreinstellungen stehen direkt im UI-Teil: Denktiefe `high` (`st.session_state.setdefault("think", "high")`), Ausgabe-Token synchron 65.536 und im Batch 32.768, Prompts pro Gespräch 1. Wiederholungen bei vorübergehenden Fehlern in `ask()`: 3 Versuche, Pause 10 s und 20 s, nur für HTTP 429, 500, 503, 504.
+Weitere Voreinstellungen stehen direkt im UI-Teil: Denktiefe `high` (`st.session_state.setdefault("think", "high")`), Ausgabe-Token synchron 65.536 und im Batch 32.768, Prompts pro Gespräch 1. Bei OpenAI: Denktiefe „Standard“ (`st.session_state.setdefault("effort", "Standard")`) und Ausgabe-Token 32.768. Wiederholungen bei vorübergehenden Fehlern in `ask()`: 3 Versuche, Pause 10 s und 20 s, nur für HTTP 429, 500, 503, 504.
 
 ### 6.3 Streamlit-Konfiguration (optional, `.streamlit/config.toml`)
 
@@ -253,6 +293,7 @@ Hinweise:
 |---|---|---|
 | `streamlit` | 1.55 | Oberfläche. Ab 1.55 kennt `st.tabs` den aktiven Tab (`key`, `on_change`, `.open`). Mit älteren Versionen läuft die App, prüft dann aber auch im anderen Tab. |
 | `google-genai` | 2.30.1 | Gemini-SDK. Ab 2.30.1 setzt `generate_content` Long Decode automatisch fort. Ältere Version: synchron auf 32.768 Ausgabe-Token begrenzt (die App warnt). |
+| `openai` | 1.100.0 | OpenAI-SDK (Files API, Batch API). Ab 1.100.0 kennt `files.create` den Parameter `expires_after`, mit dem die App hochgeladene PDFs ablaufen lässt. Wird erst bei OpenAI-Nutzung importiert: Ohne das Paket läuft Gemini weiter, und die App meldet bei OpenAI, was fehlt. |
 | `google-api-python-client`, `google-auth-oauthlib` | beliebig | Drive-Zugriff (werden erst bei Drive-Nutzung importiert) |
 | `streamlit` (nur Tests) | 1.56 | `AppTest` unterstützt Datei-Uploads erst ab 1.56 (`requirements-dev.txt`). Die App selbst läuft ab 1.55 |
 | `pytest` | 8 | nur für die Tests (`requirements-dev.txt`) |
@@ -279,8 +320,10 @@ gemini-4-batch/                     # Projektordner
 └── data/                           # erzeugte Daten
     ├── batch_jobs.json             # Verlauf + Ergebnisse (+ batch_jobs.tmp beim Schreiben)
     ├── batch_jobs.defekt-<ts>.json # Sicherung, falls batch_jobs.json beschädigt war
-    ├── pdf_files.json              # PDF-Hash -> Files-API-Name
-    └── requests_<unixzeit>.jsonl   # je Batch die exakt gesendeten Anfragen
+    ├── pdf_files.json              # PDF-Hash -> Files-API-Name (Gemini)
+    ├── openai_files.json           # PDF-Hash -> Datei-ID (OpenAI Files API)
+    ├── requests_<unixzeit>.jsonl   # je Gemini-Batch die exakt gesendeten Anfragen
+    └── requests_openai_<unixzeit>.jsonl  # dasselbe für OpenAI-Batches
 ```
 
 **Lage der App-Datei.** `README.md`, `requirements*.txt` und `pytest.ini` bleiben im Projektordner, weil Werkzeuge sie dort erwarten. Liegt `gemini_batch_ui.py` noch direkt im Projektordner (älterer Stand), läuft die App ebenfalls: `conf/` und `data/` entstehen dann im Ordner der Datei und damit an derselben Stelle. Für bestehende Installationen genügt es, die Datei nach `src/` zu verschieben. `conf/` und `data/` bleiben unverändert, nur der Startbefehl ändert sich zu `streamlit run src/gemini_batch_ui.py`.
@@ -321,6 +364,23 @@ Batch-Eintrag (Felder `state`, `rows`, `error`, `api_model` kommen erst, wenn de
 }
 ```
 
+OpenAI-Eintrag (nur Batch): dieselben Felder, dazu `provider` (nur bei OpenAI vorhanden). `name` ist die Batch-ID, `state` der Status der Batch API in Kleinbuchstaben (`completed`, `failed`, `expired`, `cancelled`), `api_model` der von OpenAI gemeldete Modellname:
+
+```json
+{
+  "name": "batch_<id>",
+  "provider": "OpenAI",
+  "label": "openai-20261110-0930",
+  "model": "gpt-6-astra",
+  "think": "high",
+  "max_out": 32768,
+  "state": "completed",
+  "api_model": "gpt-6-astra-<datum>"
+}
+```
+
+Die übrigen Felder (`pdf`, `pdfs`, `prompts`, `system`, `created`, `rows`, `error`) sind wie beim Batch-Eintrag oben. Fehlt `provider`, gilt der Eintrag als Gemini-Eintrag (`entry_provider()`).
+
 Synchroner Eintrag (Zeilen wachsen live):
 
 ```json
@@ -344,7 +404,7 @@ Synchroner Eintrag (Zeilen wachsen live):
 
 `state` synchron: `RUNNING`, `DONE`, `FAILED` (mit Feld `error`), `CANCELLED`. `INTERRUPTED` wird **nicht gespeichert**, sondern in `sync_view()` abgeleitet, wenn `RUNNING` in der Datei steht, aber kein Thread mehr lebt.
 
-Eine Zeile in `rows` (beide Modi, erzeugt von `parse_line()`):
+Eine Zeile in `rows` (alle Modi und Anbieter, erzeugt von `parse_line()` bzw. bei OpenAI von `parse_openai_line()`, dieselbe Form):
 
 ```json
 {
@@ -360,7 +420,7 @@ Eine Zeile in `rows` (beide Modi, erzeugt von `parse_line()`):
 }
 ```
 
-`secs` gibt es nur synchron. `error` ist ein Text (oder das Fehlerobjekt der API). Übersprungene Prompts eines abgebrochenen Gesprächs haben `error` = „Übersprungen: …“.
+`secs` gibt es nur synchron. `error` ist ein Text (bei Gemini auch das Fehlerobjekt der API, bei OpenAI immer als Text `code: Meldung`). Bei OpenAI ist `usage` das `usage`-Objekt der Antwort, `out` die Ausgabe ohne Denk-Token, `finish` ist `STOP` (Status `completed`), `MAX_TOKENS` (`incomplete` wegen `max_output_tokens`) oder sonst der Grund bzw. Status. Übersprungene Prompts eines abgebrochenen Gesprächs haben `error` = „Übersprungen: …“.
 
 Ältere Einträge können Felder nicht haben (`system`, `pdfs`, `think`, `group`, `state`, `rows` …). Neue Felder deshalb **immer optional** lesen (`.get()`).
 
@@ -369,6 +429,14 @@ Eine Zeile in `rows` (beide Modi, erzeugt von `parse_line()`):
 ```json
 {"<sha256 des PDF-Inhalts>": "files/<id der Gemini Files API>"}
 ```
+
+### `data/openai_files.json`
+
+```json
+{"<sha256 des PDF-Inhalts>": "file-<id der OpenAI Files API>"}
+```
+
+Getrennt von `pdf_files.json`, weil dieselbe Datei bei jedem Anbieter eine andere Kennung hat. Vor jeder Wiederverwendung fragt die App die Datei bei OpenAI ab und lädt neu hoch, wenn sie abgelaufen oder gelöscht ist (hier nach 3 Tagen).
 
 ### `data/requests_<unixzeit>.jsonl`
 
@@ -384,6 +452,23 @@ Eine Zeile pro Prompt, genau das, was an die Batch-API ging (Anfrageformat `Gene
 ```
 
 Nützlich zur Kontrolle: `grep -o '"thinking_level": "[a-z]*"' data/requests_*.jsonl | sort | uniq -c`.
+
+### `data/requests_openai_<unixzeit>.jsonl`
+
+Eine Zeile pro Prompt, im Format der OpenAI Batch API (Responses-Endpunkt):
+
+```json
+{"custom_id": "prompt-1", "method": "POST", "url": "/v1/responses", "body": {
+  "model": "gpt-6-astra",
+  "instructions": "…",
+  "input": [{"role": "user", "content": [
+    {"type": "input_file", "file_id": "file-…"},
+    {"type": "input_text", "text": "Prompt-Text"}]}],
+  "max_output_tokens": 32768,
+  "reasoning": {"effort": "high"}}}
+```
+
+`instructions` (Systemanweisung) und `reasoning` (Denktiefe) fehlen, wenn nichts gesetzt ist („Standard“). Kontrolle: `grep -o '"effort": "[a-z]*"' data/requests_openai_*.jsonl | sort | uniq -c`.
 
 ### Gesprächsverlauf im Prompt (Fortsetzung eines Gesprächs)
 
@@ -425,12 +510,13 @@ Eine Datei, bewusst ohne Klassen und ohne Datenbank: Funktionen oben, Oberfläch
 | Ordner | `_base_dir()` (Wurzel), `prepare_folders()` (legt `conf/` und `data/` an, übernimmt Altbestand) |
 | Verlauf | `runtime()` (prozessweit: `lock`, `threads`, `cancel`), `load_jobs()`, `mutate_jobs(lock, change)` |
 | Google Drive | `drive_service()` (OAuth, Neuanmeldung bei `RefreshError`), `drive_id()` (ID aus Link), `drive_fetch()` (PDF laden/exportieren) |
-| Gemini | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`), `pick()`, `parse_line()`, `parse_results()`, `refresh()` (Status + Ergebnisse laden, Endergebnis sichern), `batch_info()` |
+| Gemini | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`), `pick()`, `parse_line()`, `parse_results()` (mit wählbarem Zeilenleser), `refresh()` (Status + Ergebnisse laden, Endergebnis sichern, bei OpenAI-Einträgen über `fetch_openai_batch()`), `batch_info()` |
+| OpenAI | `openai_client()` (lädt das Paket erst hier), `make_client()`, `entry_provider()`, `upload_pdf_openai()` (Files API + `data/openai_files.json`), `openai_request()` (Anfragerumpf), `start_openai_batch()` (JSONL bauen, hochladen, `batches.create`), `openai_error_text()`, `parse_openai_line()`, `fetch_openai_batch()` (Status, Ausgabe- und Fehlerdatei), `cancel_batch()` (je Anbieter) |
 | Synchroner Modus | `ask()` (Retry), `run_sync()` (Thread-Funktion), `start_sync()`, `sync_view()` |
 | Gesprächsverlauf als Text | `entry_group()` (Prompts pro Gespräch eines Eintrags), `talk_safe()`, `conversation_text()`, `parse_conversation()`, `history_turns()`, `short_prompt()` |
 | Anzeige | `show_text()`, `show_prompt()`, `request_details()`, `talk_tools()`, `show_rows()`, `sync_panel()`, `job_panel()` (läuft als Fragment) |
 | Verlauf und Formular | `entry_label()`, `fill_form()` (Hilfe), `reuse_inputs()` und `continue_conversation()` (Callbacks), `delete_entry()` (Callback) |
-| UI | Seitenleiste, Tabs, `with tab_new:` (Formular + Start-Handler), `with tab_jobs:` (Auswahl, Buttons, Fragment) |
+| UI | Seitenleiste (Anbieter, Keys, Modell), `client_for()` (Client je Anbieter, `None` ohne Key), Tabs, `with tab_new:` (Formular + Start-Handler), `with tab_jobs:` (Auswahl, Buttons, Fragment mit dem Client des Eintragsanbieters) |
 
 Die UI-Grenze ist die Zeile `# ---------- UI ----------`. Alles darüber ist ohne Oberfläche testbar (siehe 9.3). Die Fixture `app` in `tests/conftest.py` lädt genau diesen Teil.
 
@@ -444,6 +530,21 @@ Formular ──► Dateien sammeln (Upload, Drive) ──► Duplikate per SHA-2
          ──► Verlaufseintrag (ohne state) in data/batch_jobs.json
 Jobs-Tab ──► Fragment alle 10 s: refresh() → client.batches.get(name)
          ──► bei JOB_STATE_SUCCEEDED: client.files.download(dest.file_name) → parse_results() → rows
+         ──► Endzustand (state, rows, error, api_model) in den Eintrag schreiben → ab da kein Abruf mehr nötig
+```
+
+### Datenfluss Batch (OpenAI)
+
+```text
+Formular ──► Dateien sammeln (Upload, Drive) ──► Duplikate per SHA-256 entfernen
+         ──► upload_pdf_openai() je PDF: Files API (Zweck user_data, Ablauf nach 3 Tagen,
+             wiederverwendet über data/openai_files.json)
+         ──► start_openai_batch(): JSONL (custom_id + Anfrage je Prompt) in data/requests_openai_<ts>.jsonl,
+             JSONL per Files API hochladen (Zweck batch), client.batches.create(input_file_id, endpoint, completion_window)
+         ──► Verlaufseintrag (provider OpenAI, ohne state) in data/batch_jobs.json
+Jobs-Tab ──► Fragment alle 10 s: refresh() → fetch_openai_batch() → client.batches.retrieve(id)
+         ──► bei completed, expired, cancelled oder failed: output_file_id und error_file_id per files.content laden
+             → parse_results(…, parse_openai_line) → rows
          ──► Endzustand (state, rows, error, api_model) in den Eintrag schreiben → ab da kein Abruf mehr nötig
 ```
 
@@ -464,6 +565,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 - **Tab-Erkennung**: `st.tabs(TABS, key="view", on_change="rerun")` (ab 1.55). `tab_jobs.open` sagt, ob der Jobs-Tab offen ist. Der Inhalt versteckter Tabs läuft trotzdem, gesteuert wird über `.open`. Ein Tab-Wechsel löst einen **vollständigen Rerun** aus. Das unterbricht jedes Skript, das gerade lange läuft (Uploads im Start-Handler). Lange Arbeit gehört deshalb in einen Hintergrund-Thread (siehe `start_sync`). Bei älteren Streamlit-Versionen schlägt der Aufruf mit `TypeError` fehl, der Fallback ist `st.tabs(TABS)`; `getattr(tab_jobs, "open", None) is not False` ergibt dann „immer prüfen“.
 - **Polling per Fragment**: `st.fragment(run_every=POLL_SECONDS if polling else None)(job_panel)(...)`. Die Entscheidung `polling` wird bei jedem vollen Lauf neu getroffen (Tab offen und Eintrag läuft). Um einen laufenden Timer zu beenden, ruft das Fragment `st.rerun()` auf (voller Rerun). Die Argumente eines Timer-Reruns sind **veraltet** (Stand des letzten vollen Laufs). Ein Fragment muss veränderliche Daten deshalb selbst neu laden (`sync_panel` liest den Eintrag aus der Datei, `job_panel` nutzt `batch_info()` und die Session).
 - **Button im Fragment, der das Formular füllt**: Ein Klick im Fragment (die Ergebnisse laufen in `job_panel`) löst nur einen Fragment-Lauf aus. „Gespräch fortsetzen“ füllt das Formular deshalb in einem **Callback** (`continue_conversation`: Widget-Werte lassen sich nur setzen, bevor das Widget im Lauf erzeugt wurde) und ruft danach `st.rerun()` auf, damit ein voller Lauf das Formular zeigt und den Tab wechselt. Im `AppTest` ist schon der erste Lauf voll. Dort verbraucht er den einmaligen Hinweis `reused_note`, im Browser erscheint er nach dem Rerun.
+- **Felder, die einen Lauf lang fehlen**: Streamlit vergisst den Wert eines Widgets, das in einem Lauf nicht gezeichnet wird (Felder des anderen Anbieters, alles hinter `st.stop()` bei fehlendem API-Key). Das Backend behält dabei teils noch Werte, der Browser baut das Feld aber mit dem Standardwert neu auf: Das Modellfeld war leer, „Max. Ausgabe-Token“ stand auf 256, die Denktiefe auf „Standard“, Prompts und Systemanweisung waren weg. Darum weist der UI-Teil jeden Wert aus `FORM_KEYS` vor dem Zeichnen neu zu (`st.session_state[key] = st.session_state[key]`). Das hält ihn am Leben und schickt ihn mit `set_value` an den Browser. `AppTest` sieht den Fehler nicht, weil es nur den Wert im Backend zeigt. Die Tests in `test_openai.py` prüfen deshalb, was die App dem Browser schickt (`proto.set_value`, Hilfsfunktion `sent_to_browser`). Namensfelder (`label_*`), die Auswahl im Jobs-Tab (`sel`), der Anbieterschalter und der Tab-Zustand (`view`) brauchen das nicht, ein Test hält die Ausnahmen fest.
 - **Threads**: `run_sync` läuft ohne `ScriptRunContext`. Dort **keine** `st.*`-Aufrufe und keine Streamlit-Cache-Funktionen. `rt = runtime()` wird im Hauptthread geholt und als Argument übergeben. Schreibzugriffe auf den Verlauf nur über `mutate_jobs(rt.lock, …)` (liest unter Sperre, schreibt atomar über `batch_jobs.tmp` + `os.replace`).
 - **Abbruch**: `rt.cancel` ist eine Menge von Eintragsnamen. `run_sync` prüft sie vor jedem Prompt. Eine laufende Anfrage wird nicht abgebrochen.
 - **Unbekannte Attribute**: `DeltaGenerator` liefert für unbekannte Namen ein aufrufbares Objekt statt `AttributeError`. Darum ist `getattr(…, "open", None) is not False` korrekt für ältere Versionen.
@@ -473,12 +575,14 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 | Schlüssel | Zweck |
 |---|---|
 | `view` | aktiver Tab (nur ab 1.55 wirksam). `reuse_inputs` und `continue_conversation` setzen ihn auf „Neue Anfrage“ |
-| `mode` | Modus-Radio (`MODE_BATCH` / `MODE_SYNC`) |
+| `provider` | Anbieter-Radio der Seitenleiste (`PROVIDERS`). `fill_form()` setzt es, wenn ein Eintrag übernommen wird |
+| `model_gemini`, `model_openai` | Modellfeld je Anbieter (`fill_form()` setzt es beim Übernehmen) |
+| `mode` | Modus-Radio (`MODE_BATCH` / `MODE_SYNC`). Mit OpenAI wird es nicht angezeigt |
 | `system`, `raw` | Systemanweisung, Prompts-Textfeld |
-| `think` | Denktiefe (Voreinstellung per `setdefault`) |
-| `max_batch`, `max_sync` | Ausgabe-Token je Modus (Voreinstellung per `setdefault`) |
+| `think`, `effort` | Denktiefe bei Gemini bzw. OpenAI (Voreinstellung per `setdefault`) |
+| `max_batch`, `max_sync`, `max_openai` | Ausgabe-Token je Modus bei Gemini bzw. bei OpenAI (Voreinstellung per `setdefault`) |
 | `group` | Prompts pro Gespräch |
-| `label_batch`, `label_sync` | Namensfeld je Modus |
+| `label_batch`, `label_sync`, `label_openai` | Namensfeld je Modus bzw. für OpenAI |
 | `sel` | Auswahl im Jobs-Tab (Wert = `entry_label(eintrag)`). Der Start-Handler setzt ihn auf den neuen Eintrag |
 | `drive_pdfs` | `{Anzeigename: Drive-ID}` der geladenen Drive-Liste |
 | `reused_note` | einmaliger Hinweis nach „Eingaben übernehmen“ und „Gespräch fortsetzen“ (wird beim Anzeigen entfernt) |
@@ -495,9 +599,9 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 1. **Erst diese Datei lesen**, dann `src/gemini_batch_ui.py` von oben nach unten. Kleine, gezielte Änderungen statt Umbauten. Die Datei bleibt eine Datei, bis sie deutlich über etwa 1.000 Zeilen wächst. Dann Logik oberhalb der UI-Grenze in Module auslagern (Importe werden gecacht, nur das Hauptskript läuft bei jedem Rerun neu).
 2. **Prefix stabil halten** (Abschnitt 5). Alles, was vor oder zwischen den PDFs steht, beeinflusst die Cache-Trefferquote.
 3. **Verlauf nur über `mutate_jobs`** schreiben, nie `data/batch_jobs.json` direkt. Lesen mit `load_jobs()`. Neue Eintragsfelder optional (`.get()`), weil alte Einträge sie nicht haben.
-4. **Zeilenform nur in `parse_line()` ändern** und dort neue Felder ergänzen. Anzeige in `show_rows()`. Beide Modi nutzen dieselbe Zeilenform, und gespeicherte Zeilen alter Läufe haben neue Felder nicht (`.get()`).
+4. **Zeilenform nur in `parse_line()` und `parse_openai_line()` ändern** und dort neue Felder ergänzen (beide liefern dieselbe Form). Anzeige in `show_rows()`. Alle Modi und Anbieter nutzen dieselbe Zeilenform, und gespeicherte Zeilen alter Läufe haben neue Felder nicht (`.get()`).
 5. **Lange Arbeit in einen Thread** mit Verlaufseintrag und Polling-Fragment legen (Muster: `start_sync` → `run_sync` → `sync_panel`). Alles im Hauptskript kann durch einen Tab-Wechsel unterbrochen werden.
-6. **Widgets, die per Code gesetzt werden sollen, brauchen einen `key`.** Voreinstellung über `st.session_state.setdefault(key, wert)` setzen und dem Widget kein `value=`/`index=` mitgeben (sonst Streamlit-Warnung). Widget-Zustand nur **vor** dem Erzeugen des Widgets im selben Lauf ändern (in Callbacks oder weiter oben im Skript), danach gibt es eine Ausnahme.
+6. **Widgets, die per Code gesetzt werden sollen, brauchen einen `key`.** Voreinstellung über `st.session_state.setdefault(key, wert)` setzen und dem Widget kein `value=`/`index=` mitgeben (sonst Streamlit-Warnung). Widget-Zustand nur **vor** dem Erzeugen des Widgets im selben Lauf ändern (in Callbacks oder weiter oben im Skript), danach gibt es eine Ausnahme. Ein neues Formularfeld mit Schlüssel gehört außerdem in `FORM_KEYS`, sonst vergisst Streamlit seinen Wert, sobald es einen Lauf lang fehlt. Ein Test erinnert daran.
 7. **Keine verschachtelten Expander** (Streamlit verbietet es). Popover in Spalten ist erlaubt.
 8. **Fragmente**: Argumente sind in Timer-Läufen veraltet, Timer mit `st.rerun()` beenden, Zustände für Abbruchbedingungen aus Datei oder Session lesen.
 9. **Fehler verständlich melden** (deutsch, mit Hinweis, was zu tun ist). Geheimnisse (API-Key, Tokens) nie loggen oder speichern.
@@ -508,8 +612,8 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 **Neuen Generierungsparameter hinzufügen (z. B. Temperatur)**
 
-1. Widget mit `key` neben „Denktiefe“ ergänzen (Voreinstellung per `setdefault`).
-2. In `start_batch()` in das Dict `gen` aufnehmen, in `run_sync()` in `types.GenerateContentConfig(...)`.
+1. Widget mit `key` neben „Denktiefe“ ergänzen (Voreinstellung per `setdefault`, Schlüssel in `FORM_KEYS` aufnehmen).
+2. In `start_batch()` in das Dict `gen` aufnehmen, in `run_sync()` in `types.GenerateContentConfig(...)`, bei OpenAI in `openai_request()`.
 3. Wert im Eintrag speichern (`start_sync()` bzw. das Batch-Eintrags-Dict im Start-Handler).
 4. `reuse_inputs()` und die Beschriftung im Jobs-Tab erweitern.
 5. Testen (9.3). In der Argon-Doku prüfen, ob der Parameter noch wirkt.
@@ -520,6 +624,13 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 2. Startfunktion nach dem Muster `start_sync()`. Eintrag mit `"mode": "<neu>"`.
 3. `job_panel()` verteilt nach `j.get("mode")`. Neues Panel ergänzen. Entscheidung `running` im `with tab_jobs:`-Block ergänzen.
 4. `reuse_inputs()` für den neuen Modus erweitern.
+
+**Weiteren Anbieter ergänzen** (Muster: OpenAI)
+
+1. Konstante `PROVIDER_…`, Eintrag in `PROVIDERS` und der Client in `make_client()`.
+2. Funktionen nach dem Muster der Landkarte (Upload, Start, Zeilen lesen, Status holen, Abbrechen). Der Zeilenleser muss die Form von `parse_line()` liefern, dann laufen Anzeige, Download und „Gespräch fortsetzen“ unverändert.
+3. Eintrag mit Feld `provider` speichern. `entry_provider()`, `refresh()`, `cancel_batch()`, `fill_form()` und die Formularzweige im UI-Teil erweitern, die Endzustände des Anbieters in `DONE` aufnehmen.
+4. Einen Fake mit echten SDK-Objekten nach dem Muster von `FakeOpenAI` bauen und Tests schreiben (9.3).
 
 **Aufbau des Verlaufstexts ändern** (Einleitung, Marken, Beschriftung): `TALK_*` anpassen. `TALK_MARK` muss zu den Marken passen, `test_every_mark_constant_is_recognized_by_the_mark_pattern` meldet Abweichungen. Bereits gesendete Prompts bleiben nur dann „abflachbar“, wenn ihre Marken noch erkannt werden. Sonst gelten sie als gewöhnliche Prompts.
 
@@ -537,7 +648,7 @@ Die Testsuite liegt in `tests/` und braucht weder Internet noch API-Key. Alle Go
 
 ```bash
 pip install -r requirements-dev.txt        # installiert zusätzlich pytest
-pytest                                     # alle Tests (rund 160, etwa 25 Sekunden)
+pytest                                     # alle Tests (rund 220, etwa 25 Sekunden)
 pytest -m "not ui"                         # nur die schnellen Tests ohne Oberfläche (unter 2 Sekunden)
 pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnitt
 ```
@@ -547,13 +658,14 @@ pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnit
 | Datei | Inhalt |
 |---|---|
 | `pytest.ini` | Einstellungen, Marker `ui` für die langsameren Oberflächentests |
-| `tests/conftest.py` | Fixtures: `home` (Wegwerf-Ordner als `GEMINI_UI_HOME`, Dummy-Key), `app` (die App ohne Oberfläche als Objekt), `rt` (Ersatz für `runtime()`), `fake_time` (keine echten Pausen). Dazu eine Sperre gegen echte API-Zugriffe und ein Sicherheitsnetz: ändert ein Test `conf/` oder `data/` im Projektordner, schlägt der Lauf am Ende fehl |
-| `tests/fakes.py` | `FakeGemini` (Files API, Batch-API, `generate_content`, zeichnet Aufrufe auf), `make_response`, `ApiError`, `FakeDrive`, `install`, `install_drive` |
-| `tests/helpers.py` | `wait_until`, `wait_for_run_end`, Verlauf lesen und schreiben, Eintrags-Vorlagen (`batch_entry`, `sync_entry`, `finished_batch`, `row`), AppTest-Kürzel (`new_app`, `click`, `set_prompts`, `captions`, `markdown`) |
+| `tests/conftest.py` | Fixtures: `home` (Wegwerf-Ordner als `GEMINI_UI_HOME`, Dummy-Keys für beide Anbieter), `app` (die App ohne Oberfläche als Objekt), `rt` (Ersatz für `runtime()`), `fake_time` (keine echten Pausen). Dazu eine Sperre gegen echte API-Zugriffe und ein Sicherheitsnetz: ändert ein Test `conf/` oder `data/` im Projektordner, schlägt der Lauf am Ende fehl |
+| `tests/fakes.py` | `FakeGemini` (Files API, Batch-API, `generate_content`, zeichnet Aufrufe auf), `make_response`, `ApiError`, `FakeDrive`, `install`, `install_drive`. Für OpenAI: `FakeOpenAI` (Files API und Batch API, liefert echte SDK-Objekte `Batch` und `FileObject`), `make_openai_body` (Antwortrumpf wie in der Ausgabedatei), `OpenAIError`, `install_openai` |
+| `tests/helpers.py` | `wait_until`, `wait_for_run_end`, Verlauf lesen und schreiben, Eintrags-Vorlagen (`batch_entry`, `sync_entry`, `finished_batch`, `openai_entry`, `finished_openai_batch`, `row`), AppTest-Kürzel (`new_app`, `new_openai_app`, `click`, `set_prompts`, `captions`, `markdown`) |
 | `tests/test_logic.py` | reine Logik: Parser, Hilfsfunktionen, Ordner und Altbestand, Verlaufsdatei, PDF-Upload, Batch-Anfragen, Wiederholungen, Gesprächsverlauf als Text (Aufbau, Wiedereinlesen, mehrfaches Fortsetzen) |
 | `tests/test_sync_worker.py` | synchroner Modus: Anfrageaufbau, Gespräche, Fehlerfälle, Abbruch, Zustände |
 | `tests/test_drive.py` | Drive-Anmeldung (Token, Neuanmeldung, Netzwerkfehler) und Laden von Dateien |
 | `tests/test_ui.py` | Oberfläche mit AppTest: Formular, Starts, Jobs-Tab, automatische Prüfung, Übernehmen, Löschen, Altbestand, Ordnerlage, Prompt-Anzeige, Gespräch fortsetzen (Marker `ui`) |
+| `tests/test_openai.py` | OpenAI-Anbindung: Anfrageaufbau, PDF-Upload, Ergebniszeilen, Status und Ergebnisdateien, Anbieter-Schalter, Formularwerte beim Anbieterwechsel (was die App dem Browser schickt), Start, Jobs-Tab, Übernehmen, Fortsetzen. Ein Test prüft, dass die Beispielantworten des Fakes gültige Objekte des SDK sind (Oberflächentests mit Marker `ui`) |
 | `tests/test_docs.py` | gleicht README und Code ab: genannte Funktionen, Konstanten, Schlüssel, Versionen, Testdateien |
 | `tests/test_ci.py` | prüft die GitHub-Actions-Datei: Auslöser, Befehle, Python-Versionen laut README, Rechte |
 
@@ -562,6 +674,7 @@ pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnit
 - Der Code oberhalb von `# ---------- UI ----------` wird per `exec` geladen und als `app` bereitgestellt (`app.parse_line(...)`). Streamlit-Aufrufe darin laufen im „bare mode“, das ist gewollt.
 - Die Oberfläche läuft in Streamlits `AppTest` (`new_app()`): Widgets per `key` ansprechen, Tabs über `at.session_state["view"]` wechseln, Uploads mit `at.file_uploader[0].set_value([(name, bytes, mime)])`.
 - Dienste ersetzt man mit `FakeGemini(...)` (Logiktests) bzw. `use_fake(...)` (Oberflächentests). Das Argument `script` bestimmt die Antworten von `generate_content` der Reihe nach: `"ok"`, `"empty"`, ein `dict` für `make_response`, oder eine Exception, die ausgelöst wird.
+- OpenAI ersetzt `FakeOpenAI(...)` (in `test_openai.py` über `use_openai(...)`). `batch_status`, `failing`, `bodies` und `batch_errors` bestimmen, was die Batch API meldet und was in Ausgabe- und Fehlerdatei steht. Oberflächentests für OpenAI starten mit `new_openai_app()`: Der Anbieter ist dann schon gewählt, es wird nie ein Gemini-Client gebaut.
 - Drive ersetzt `install_drive(...)`: Anmeldung und Dienst sind Fakes, `token.json` liegt dann in `conf/` des Wegwerf-Ordners.
 
 **Ein neuer Test**
@@ -590,7 +703,7 @@ def test_beispiel(monkeypatch, home):
 4. Neue Funktion: Test in `test_logic.py` oder `test_sync_worker.py`. Neue Oberflächenfunktion: ein `ui`-Test. Neue Datei, Konstante, Schlüssel oder Funktion, die die README nennt: README anpassen, sonst schlägt `test_docs.py` an.
 5. Ältere Einträge ohne neue Felder müssen offen bleiben. `test_entries_from_older_versions_still_open` ist das Muster dafür.
 
-**Grenze der Tests.** Sie zeigen, dass die App mit Antworten in der Form des echten SDK richtig umgeht. Sie beweisen nicht, dass Google so antwortet wie `FakeGemini` (Caching, Limits, Fehlertexte). Das bleibt beim ersten echten Einsatz zu beobachten (Abschnitt 13).
+**Grenze der Tests.** Sie zeigen, dass die App mit Antworten in der Form des echten SDK richtig umgeht. Sie beweisen nicht, dass Google so antwortet wie `FakeGemini` und OpenAI wie `FakeOpenAI` (Caching, Limits, Fehlertexte). Das bleibt beim ersten echten Einsatz zu beobachten (Abschnitt 13).
 
 ### 9.4 Checkliste vor der Übergabe
 
@@ -648,6 +761,11 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 | Synchron nur 32.768 Ausgabe-Token wählbar, Warnung zu google-genai | SDK älter als 2.30.1 | `pip install -U google-genai` (in eigener Umgebung). |
 | Automatische Prüfung läuft auch im Tab „Neue Anfrage“ | Streamlit älter als 1.55, kennt den aktiven Tab nicht | Streamlit aktualisieren. |
 | „Abruf fehlgeschlagen … 404“ bei altem Batch | Batch existiert bei Google nicht mehr (nach Ablauf) und wurde lokal nie gesichert | Nichts zu retten. Eintrag löschen. Neue Batches sichern ihr Ergebnis lokal. |
+| OpenAI-Eintrag: „Der OpenAI API-Key fehlt (Seitenleiste)“ | Das Keyfeld dieses Anbieters ist leer, während ein Eintrag von ihm geöffnet ist | Key eintragen. Gesicherte Ergebnisse sind auch ohne Key sichtbar. |
+| „Das Paket openai fehlt“ beim Wechsel auf OpenAI | Nach dem Update wurde `pip install -r requirements.txt` nicht ausgeführt | Nachholen. Gemini läuft auch ohne das Paket. |
+| OpenAI: Fehler je Prompt zu `reasoning.effort` | Das Modell kennt die gewählte Denktiefe nicht (z. B. `none` bei `gpt-6-astra`) | Andere Stufe oder „Standard“ wählen und neu starten (Eingaben übernehmen). |
+| OpenAI-Batch endet mit `failed`, die Meldung nennt ein Token-Limit | Die Summe der Token aller eingereihten Batches überschreitet das Warteschlangenlimit des Modells | Weniger Prompts oder kürzere PDFs je Batch, warten bis andere Batches fertig sind, Limits der Kontostufe bei OpenAI prüfen. |
+| OpenAI-Batch `expired`, einzelne Prompts mit Fehler | Das Zeitfenster von 24 Stunden reichte nicht für alle Anfragen. Die fertigen Antworten sind geladen | Die fehlenden Prompts mit „Eingaben übernehmen“ erneut starten. |
 | `data/batch_jobs.defekt-<zahl>.json` taucht auf | `data/batch_jobs.json` war beschädigt, die App hat sie gesichert und neu begonnen | Sicherung prüfen, ggf. Einträge von Hand zurückkopieren. |
 | Verlauf leer nach dem Wechsel auf `conf/` und `data/` | Alte `batch_jobs.json` lag nicht im Projektordner, oder `GEMINI_UI_HOME` zeigt woanders hin | Datei von Hand nach `data/` kopieren bzw. `GEMINI_UI_HOME` prüfen. |
 
@@ -655,6 +773,9 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 **Einschränkungen**
 
+- OpenAI gibt es nur im **Batch-Modus**. Der synchrone Modus (samt „Prompts pro Gespräch“) ist Gemini vorbehalten, weil er an Gemini-Typen und Gemini-Caching hängt.
+- Die gültigen Denktiefen sind bei OpenAI nicht je Modell hinterlegt, weil sie sich schnell ändern: Die Auswahl zeigt alle Stufen, unpassende lehnt die API je Prompt ab.
+- OpenAI bekommt PDFs mit Text und Seitenbildern, die Detailstufe (`detail`) ist nicht einstellbar. Die Eingabe-Token können sich deshalb von denen bei Gemini unterscheiden.
 - Implizites Caching ist nicht garantiert und bei Argon die einzige Cache-Art. Im Batch gibt es dazu keine Doku, synchron ist es bestmöglich vorbereitet, aber unbewiesen.
 - Synchron läuft **sequenziell**. Parallele Anfragen würden Cache-Treffer am Anfang eher verhindern.
 - Der Start (Dateien laden, hochladen) läuft im Hauptskript. Ein Tab-Wechsel währenddessen bricht ihn ab (im Statusfeld vermerkt).
@@ -676,15 +797,17 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Fortsetzung als echter Mehr-Runden-Verlauf (`user`/`model`-Nachrichten statt Text im Prompt). Dazu müsste der Eintrag die Modellantworten samt Denk-Signaturen speichern.
 - Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Argon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
-- Aufräumen alter `data/requests_*.jsonl`.
+- Aufräumen alter `data/requests_*.jsonl` (und `data/requests_openai_*.jsonl`).
+- OpenAI: Detailstufe der PDF-Seitenbilder (`detail`) wählbar machen, synchroner Modus über die Responses API, Modellvorschläge aus der Modellliste der API statt Freitext.
+- Die App-Datei hat mit der OpenAI-Anbindung rund 1.100 Zeilen. Nach Regel 1 in Abschnitt 9.1 wäre das Auslagern der Logik oberhalb der UI-Grenze in Module der nächste Schritt, sobald weiterer Code dazukommt.
 - Dependabot für die Versionen der Actions (`.github/dependabot.yml`).
 - Wenige, bewusst kostenpflichtige „Live“-Tests gegen die echte API (eigener Marker, standardmäßig übersprungen), die Annahmen aus Abschnitt 5 prüfen.
 
 ## 12. Sicherheit und Datenschutz
 
-- **Daten verlassen den Rechner**: PDFs, Prompts und Ergebnisse gehen an Google (Gemini Files API, Batch-API, Modell). Hochgeladene Dateien liegen dort zeitlich begrenzt (derzeit 48 Stunden), Batch-Ergebnisse 6 Wochen. Das gilt für Inhalte, die diese Weitergabe erlauben.
+- **Daten verlassen den Rechner**: PDFs, Prompts und Ergebnisse gehen an den gewählten Anbieter: Google (Gemini Files API, Batch-API, Modell) oder OpenAI (Files API, Batch API, Modell). Bei Google liegen hochgeladene Dateien zeitlich begrenzt (derzeit 48 Stunden), Batch-Ergebnisse 6 Wochen. Bei OpenAI setzt die App für PDFs einen Ablauf von 3 Tagen (`OPENAI_FILE_TTL`), die Batch-Datei folgt dem Standard von OpenAI (30 Tage). Die Ausgabe- und Fehlerdateien der Batches löscht die App nicht, sie unterliegen den Aufbewahrungsregeln der OpenAI-Plattform. Das gilt für Inhalte, die diese Weitergabe erlauben.
 - **Drive**: nur Lesezugriff (`drive.readonly`). Die App kann nichts ändern oder löschen.
-- **Geheimnisse**: `conf/` (vor allem `credentials.json` und `token.json`) nicht weitergeben und nicht einchecken. Der API-Key steht nur im Browserfeld oder in der Umgebungsvariable.
+- **Geheimnisse**: `conf/` (vor allem `credentials.json` und `token.json`) nicht weitergeben und nicht einchecken. Die API-Keys stehen nur in den Browserfeldern oder in den Umgebungsvariablen.
 - **Lokale Daten**: `data/` (z. B. `batch_jobs.json`, `requests_*.jsonl`) enthält Prompts und Antworten im Klartext. Ordner entsprechend schützen (`.gitignore`, Dateirechte).
 - Die App ist für **einen Benutzer auf dem eigenen Rechner** gedacht, ohne Anmeldung. Streamlit lauscht standardmäßig auch im lokalen Netz (die Startmeldung nennt eine „Network URL“), dann könnte jeder im Netz die App samt API-Key-Feld bedienen. Wer das nicht möchte, startet mit `streamlit run src/gemini_batch_ui.py --server.address localhost`. Nicht ungeschützt im Internet betreiben.
 
@@ -692,11 +815,13 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
-- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 157 Tests liefen grün in frisch installierten Umgebungen mit Python 3.11.15 und 3.12.3 (jeweils Streamlit 1.67.0, google-genai 3.0.0) sowie mit der niedrigsten unterstützten Kombination (Python 3.12.3, Streamlit 1.56.0, google-genai 2.30.1). Mit Streamlit 1.55.0 laufen alle bis auf die drei Upload-Tests, die `AppTest` dort noch nicht unterstützt.
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 224 Tests liefen grün in frisch installierten Umgebungen mit Python 3.12.3: mit den neuesten Versionen (Streamlit 1.67.0, google-genai 3.0.0, openai 3.46.0) und mit der niedrigsten unterstützten Kombination (Streamlit 1.56.0, google-genai 2.30.1, openai 1.100.0). Mit Streamlit 1.55.0 laufen alle bis auf die sechs Upload-Tests (drei in `tests/test_ui.py`, drei in `tests/test_openai.py`), die `AppTest` dort noch nicht unterstützt. Ein Lauf mit Python 3.11 fand nach der OpenAI-Erweiterung nicht statt (in der Entwicklungsumgebung gab es nur 3.12), die GitHub-Actions-Matrix deckt 3.11 und 3.12 ab.
 - „Gespräch fortsetzen“ und die Prompt-Anzeige wurden zusätzlich einmal in einem echten Headless-Chromium gegen die laufende App mit Ersatzdiensten durchgespielt (Klick im Fragment, Tab-Wechsel, Hinweis, Startsperre, zweites Fortsetzen ohne Verschachtelung). Dieser Browsertest gehört nicht zur Testsuite.
+- Der Anbieterwechsel (Gemini, OpenAI, zurück zu Gemini, mit leerem und mit gesetztem OpenAI-Key, auch bei geöffnetem Jobs-Tab) wurde ebenfalls in einem echten Headless-Chromium gegen die laufende App durchgespielt. Modell, Denktiefe, Token-Limit, Prompts und Systemanweisung blieben erhalten, beide Anbieter behielten ihre eigenen Werte. Ohne die Zuweisung vor dem Zeichnen (`FORM_KEYS`) standen nach dem Rückwechsel das Modellfeld leer, das Token-Limit auf 256, die Denktiefe auf „Standard“, und Prompts und Systemanweisung fehlten. Auch dieser Browsertest gehört nicht zur Testsuite.
 - Der GitHub-Workflow (Abschnitt 9.5) wurde mit `actionlint` geprüft, und seine Befehle liefen wie oben beschrieben in frischen Umgebungen. Auf GitHub selbst lief er noch nicht.
 - Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
 - **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, „Gespräch fortsetzen“ (wie das Modell auf einen Prompt mit eingefügtem Verlauf antwortet), Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
+- **OpenAI-Anbindung: nur mit simulierten Diensten getestet**, nicht gegen die echte OpenAI-API (in der Entwicklungsumgebung gab es weder Key noch Zugriff). `FakeOpenAI` liefert echte SDK-Objekte (`Batch`, `FileObject`), und ein Test stellt sicher, dass die Beispielantworten gültige `Response`-Objekte des SDK sind (openai 3.46.0). Feldnamen, Endpunkt, Parameter und die erlaubten Denktiefen stammen aus der OpenAI-Dokumentation und dem SDK. Ungeprüft, bitte beim ersten echten Einsatz beobachten: ob ein Batch am Endpunkt `/v1/responses` PDFs per `file_id` (`input_file`) annimmt (die gelesenen Dokumentationsstellen schließen es nicht aus, bestätigen es für Batches aber auch nicht), welche Denktiefen das gewählte Modell kennt, ob Cache-Treffer im Batch vorkommen, die Fehlercodes der Fehlerdatei (die Beispiele in den Tests sind nicht aus echten Läufen) und die Meldung bei überschrittenem Warteschlangenlimit.
 - Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
 
 **Quellen** (Stand Oktober 2026, bitte auf Änderungen prüfen)
@@ -708,8 +833,19 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Drive-API-Quickstart für Python (OAuth-Einrichtung): <https://developers.google.com/workspace/drive/api/quickstart/python>
 - Streamlit-Dokumentation (`st.tabs`, `st.fragment`, `AppTest`): <https://docs.streamlit.io>
 
+OpenAI (Stand 10.11.2026, bitte auf Änderungen prüfen):
+
+- Batch API (Format, Fenster, Limits, Statuswerte, Ergebnis- und Fehlerdatei): <https://developers.openai.com/api/docs/guides/batch>
+- Batch anlegen (Parameter): <https://developers.openai.com/api/docs/api-reference/batch/create>
+- Dateien als Eingabe (`input_file`, `user_data`, Größenlimits): <https://developers.openai.com/api/docs/guides/file-inputs>
+- PDF-Dateien (Text und Seitenbilder, `detail`): <https://developers.openai.com/api/docs/guides/pdf-files>
+- Prompt Caching (Prefix, `cached_tokens`, Cache-Schreiben): <https://developers.openai.com/api/docs/guides/prompt-caching>
+- Aktuelle Modelle und ihre Denktiefen: <https://developers.openai.com/api/docs/guides/latest-model> und Modellseite <https://developers.openai.com/api/docs/models/gpt-6-astra>
+
 ## Glossar
 
+- **Anbieter**: Gemini (Google) oder OpenAI. Jeder Verlaufseintrag gehört zu einem Anbieter (Feld `provider`, fehlt es, gilt Gemini).
+- **Responses API**: OpenAIs Schnittstelle für Textantworten. Die Batch API nimmt sie als Endpunkt `/v1/responses` und liefert Ausgabe- und Fehlerdatei.
 - **Prefix**: der gemeinsame Anfang zweier Anfragen. Implizites Caching greift darauf.
 - **Implizites Caching**: Google erkennt gleiche Anfänge automatisch und berechnet sie günstiger. Keine Zusage.
 - **Explizites Caching**: man legt selbst einen Cache an und referenziert ihn. Garantiert die Ersparnis, für Argon nicht verfügbar.
