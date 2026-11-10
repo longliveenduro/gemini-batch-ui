@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 APP_PATH = ROOT / "src" / "gemini_batch_ui.py"
 
 # Texte der Oberfläche, auf die sich Tests stützen. test_logic prüft, dass sie mit der App übereinstimmen.
+PROVIDER_GEMINI, PROVIDER_OPENAI = "Gemini", "OpenAI"
 MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
 MODE_SYNC = "Synchron (nacheinander, Cache-Treffer möglich)"
 TAB_NEW, TAB_JOBS = "Neue Anfrage", "Jobs und Ergebnisse"
@@ -62,6 +63,19 @@ def finished_batch(**over):
     return batch_entry(state="JOB_STATE_SUCCEEDED", rows=[row()], error=None, api_model="models/gemini-4-argon", **over)
 
 
+def openai_entry(**over):
+    """Frisch gestarteter OpenAI-Batch (noch ohne Endzustand)."""
+    e = batch_entry(name="batch_abc123def456", provider=PROVIDER_OPENAI, label="openai-batch", model="gpt-6-astra")
+    e.update(over)
+    return e
+
+
+def finished_openai_batch(**over):
+    """OpenAI-Batch mit lokal gesichertem Endergebnis."""
+    return openai_entry(state="completed", rows=[row(model="gpt-6-astra-2026-09-01")], error=None,
+                        api_model="gpt-6-astra-2026-09-01", **over)
+
+
 def sync_entry(**over):
     e = {"name": "sync-20261002-120000-bbbb", "mode": "sync", "state": "DONE", "label": "paar-lauf",
          "model": "gemini-4-argon", "pdf": "a.pdf, b.pdf", "pdfs": ["a.pdf", "b.pdf"],
@@ -84,6 +98,13 @@ def new_app(tab=None):
     at = AppTest.from_file(str(APP_PATH), default_timeout=30)
     if tab:
         at.session_state["view"] = tab
+    return at
+
+
+def new_openai_app(tab=None):
+    """Wie new_app(), aber mit OpenAI als Anbieter für neue Anfragen. Ein Gemini-Client wird dabei nie gebaut."""
+    at = new_app(tab)
+    at.session_state["provider"] = PROVIDER_OPENAI
     return at
 
 

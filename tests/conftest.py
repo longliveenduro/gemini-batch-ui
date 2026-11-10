@@ -35,11 +35,12 @@ def project_folder_stays_untouched():
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
-    """Wegwerf-Ordner als Wurzel für conf/ und data/ (GEMINI_UI_HOME) und ein Dummy-API-Key."""
+    """Wegwerf-Ordner als Wurzel für conf/ und data/ (GEMINI_UI_HOME) und Dummy-API-Keys für beide Anbieter."""
     folder = tmp_path / "home"
     folder.mkdir()
     monkeypatch.setenv("GEMINI_UI_HOME", str(folder))
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     return folder
 
 
@@ -47,11 +48,13 @@ def home(tmp_path, monkeypatch):
 def no_real_api(monkeypatch):
     """Ohne installierten Fake-Client scheitert jeder Versuch, einen echten Client zu bauen."""
     import google.genai as genai
+    import openai
 
     def refuse(*args, **kwargs):
         raise AssertionError("Kein Fake-Client installiert: Der Test hätte die echte API angesprochen.")
 
     monkeypatch.setattr(genai, "Client", refuse)
+    monkeypatch.setattr(openai, "OpenAI", refuse)
 
 
 class StubTime:

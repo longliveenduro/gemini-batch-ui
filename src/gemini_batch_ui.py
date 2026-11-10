@@ -1,11 +1,13 @@
-"""Lokale Batch- und Synchron-UI für Gemini 4 Argon (Streamlit).
+"""Lokale Batch- und Synchron-UI für Gemini 4 Argon und OpenAI (Streamlit).
 
 Start:    pip install -r requirements.txt && streamlit run src/gemini_batch_ui.py   (im Projektordner)
-API-Key:  Umgebungsvariable GEMINI_API_KEY oder Seitenleiste.
-Modi:     Batch (asynchron, 50 % Rabatt) oder Synchron (nacheinander, impliziter Cache über alle Prompts,
+API-Key:  Umgebungsvariablen GEMINI_API_KEY und OPENAI_API_KEY oder Seitenleiste.
+Anbieter: Gemini (Batch und Synchron) oder OpenAI (nur Batch, Responses-Endpunkt), gewählt in der Seitenleiste.
+Modi:     Batch (asynchron, 50 % Rabatt) oder Synchron (nur Gemini: nacheinander, impliziter Cache über alle Prompts,
           optional in Gesprächen: je N Prompts bilden einen gemeinsamen Kontext, das nächste Gespräch beginnt neu).
 Ordner:   conf/ (Zugangsdaten, geheim: credentials.json, token.json) und data/ (batch_jobs.json = Verlauf und
-          Ergebnisse, pdf_files.json = hochgeladene PDFs, requests_*.jsonl = gesendete Batch-Anfragen).
+          Ergebnisse, pdf_files.json und openai_files.json = hochgeladene PDFs, requests_*.jsonl = gesendete
+          Batch-Anfragen).
           Beide liegen im Projektordner neben src/ (dem Ordner dieser Datei), oder unter dem Ordner aus der
           Umgebungsvariable GEMINI_UI_HOME.
 Drive:    (optional) In der Google Cloud Console die Drive API aktivieren, eine OAuth-Client-ID
@@ -50,10 +52,16 @@ CREDENTIALS_FILE = CONF_DIR / "credentials.json"
 TOKEN_FILE = CONF_DIR / "token.json"
 HISTORY = DATA_DIR / "batch_jobs.json"
 FILES_DB = DATA_DIR / "pdf_files.json"  # PDF-Hash -> Name der Datei in der Gemini Files API
+OPENAI_FILES_DB = DATA_DIR / "openai_files.json"  # PDF-Hash -> ID der Datei in der OpenAI Files API
+PROVIDER_GEMINI = "Gemini"
+PROVIDER_OPENAI = "OpenAI"
+PROVIDERS = [PROVIDER_GEMINI, PROVIDER_OPENAI]  # Auswahl in der Seitenleiste, Voreinstellung ist der erste
 DEFAULT_MODEL = "gemini-4-argon"
+DEFAULT_OPENAI_MODEL = "gpt-6-astra"
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 POLL_SECONDS = 10  # Abstand der automatischen Prüfung im Tab „Jobs und Ergebnisse“
-DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"}
+DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED",  # Gemini
+        "completed", "failed", "cancelled", "expired"}  # OpenAI (Status der Batch API, klein geschrieben)
 BATCH_MAX_OUT = 32768      # Batch-Anfragen unterstützen kein Long Decode
 SYNC_MAX_OUT = 1_048_576   # synchron: Long Decode über das SDK (ab google-genai 2.30.1)
 SYNC_TIMEOUT_MS = 25 * 60 * 1000  # Argon-Aufrufe können lange laufen (Doku: mindestens 20 Minuten)
@@ -62,6 +70,11 @@ TABS = ["Neue Anfrage", "Jobs und Ergebnisse"]
 MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
 MODE_SYNC = "Synchron (nacheinander, Cache-Treffer möglich)"
 THINK_LEVELS = ["Standard", "low", "medium", "high"]
+# OpenAI: reasoning.effort. Welche Stufen ein Modell kennt, hängt vom Modell ab, die API lehnt andere ab.
+OPENAI_EFFORTS = ["Standard", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+OPENAI_ENDPOINT = "/v1/responses"  # Endpunkt der OpenAI Batch API (nimmt Denktiefe und PDFs als Datei-ID entgegen)
+OPENAI_MAX_OUT = 128_000   # größte Ausgabe-Obergrenze der aktuellen Modelle, je Modell kann sie niedriger sein
+OPENAI_FILE_TTL = 3 * 24 * 3600  # hochgeladene PDFs verfallen bei OpenAI nach 3 Tagen (erlaubt: 1 Stunde bis 30 Tage)
 HINT = " (bitte den Tab nicht wechseln)"
 SEPARATOR = re.compile(r"^\s*---\s*$", re.M)  # eine Zeile nur mit --- trennt im Formular die Prompts
 # Gesprächsverlauf als Text („Gespräch fortsetzen“): Je Runde steht mein früherer Prompt und deine Antwort dazu.
@@ -257,24 +270,27 @@ def parse_line(o, prompts):
     }
 
 
-def parse_results(raw, prompts):
-    rows = [parse_line(json.loads(line), prompts) for line in raw.decode("utf-8").splitlines() if line.strip()]
+def parse_results(raw, prompts, parse=parse_line):
+    rows = [parse(json.loads(line), prompts) for line in raw.decode("utf-8").splitlines() if line.strip()]
     num = lambda r: int(r["key"].rsplit("-", 1)[-1]) if r["key"].rsplit("-", 1)[-1].isdigit() else 0
     return sorted(rows, key=num)
 
 
 def refresh(client, j):
-    job = client.batches.get(name=j["name"])
-    state, rows = job.state.name, None
-    if state == "JOB_STATE_SUCCEEDED" and job.dest and job.dest.file_name:
-        rows = parse_results(client.files.download(file=job.dest.file_name), j["prompts"])
-    err = str(job.error) if job.error else None
-    st.session_state["res:" + j["name"]] = {"state": state, "rows": rows, "error": err, "model": job.model}
-    if state in DONE:  # Endergebnis lokal sichern: bleibt nach Ablauf bei Google erhalten und lädt ohne Abruf
+    if entry_provider(j) == PROVIDER_OPENAI:
+        state, rows, err, api_model = fetch_openai_batch(client, j)
+    else:
+        job = client.batches.get(name=j["name"])
+        state, rows = job.state.name, None
+        if state == "JOB_STATE_SUCCEEDED" and job.dest and job.dest.file_name:
+            rows = parse_results(client.files.download(file=job.dest.file_name), j["prompts"])
+        err, api_model = (str(job.error) if job.error else None), job.model
+    st.session_state["res:" + j["name"]] = {"state": state, "rows": rows, "error": err, "model": api_model}
+    if state in DONE:  # Endergebnis lokal sichern: bleibt nach Ablauf beim Anbieter erhalten und lädt ohne Abruf
         def save(jobs):
             for x in jobs:
                 if x["name"] == j["name"]:
-                    x.update(state=state, rows=rows, error=err, api_model=job.model)
+                    x.update(state=state, rows=rows, error=err, api_model=api_model)
         mutate_jobs(runtime().lock, save)
 
 
@@ -284,6 +300,150 @@ def batch_info(j):
     if info is None and j.get("state") in DONE:
         info = {"state": j["state"], "rows": j.get("rows"), "error": j.get("error"), "model": j.get("api_model")}
     return info
+
+
+# ---------- OpenAI (nur Batch, Endpunkt /v1/responses) ----------
+def openai_client(api_key):
+    """OpenAI-Client. Das Paket wird erst hier geladen: Wer nur Gemini nutzt, braucht es nicht."""
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise RuntimeError("Das Paket openai fehlt. Installieren: pip install -r requirements.txt") from e
+    return OpenAI(api_key=api_key)
+
+
+def make_client(provider, api_key):
+    return openai_client(api_key) if provider == PROVIDER_OPENAI else genai.Client(api_key=api_key)
+
+
+def entry_provider(j):
+    """Anbieter eines Eintrags. Ältere Einträge haben kein Feld provider und stammen von Gemini."""
+    return PROVIDER_OPENAI if j.get("provider") == PROVIDER_OPENAI else PROVIDER_GEMINI
+
+
+def upload_pdf_openai(client, name, data):
+    """PDF in die OpenAI Files API laden (Zweck user_data). Gleicher Inhalt: gleiche Datei, solange OpenAI sie hält."""
+    key = hashlib.sha256(data).hexdigest()
+    db = json.loads(OPENAI_FILES_DB.read_text("utf-8")) if OPENAI_FILES_DB.exists() else {}
+    if key in db:
+        try:
+            f = client.files.retrieve(db[key])
+            if getattr(f, "status", None) != "error":
+                return f
+        except Exception:  # abgelaufen, gelöscht oder aus einem anderen Projekt: neu hochladen
+            pass
+    f = client.files.create(
+        file=(name if name.lower().endswith(".pdf") else name + ".pdf", io.BytesIO(data), "application/pdf"),
+        purpose="user_data",
+        expires_after={"anchor": "created_at", "seconds": OPENAI_FILE_TTL},
+    )
+    db[key] = f.id
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    OPENAI_FILES_DB.write_text(json.dumps(db), "utf-8")
+    return f
+
+
+def openai_request(model, pdf_ids, prompt, system, effort, max_out):
+    """Rumpf einer Responses-Anfrage für einen Prompt. Die PDFs stehen ganz vorn, immer in derselben Reihenfolge:
+    identischer Prefix fürs automatische Caching."""
+    parts = [{"type": "input_file", "file_id": i} for i in pdf_ids] + [{"type": "input_text", "text": prompt}]
+    body = {"model": model, "input": [{"role": "user", "content": parts}], "max_output_tokens": int(max_out)}
+    if system:
+        body["instructions"] = system
+    if effort != "Standard":
+        body["reasoning"] = {"effort": effort}
+    return body
+
+
+def start_openai_batch(client, model, pdf_ids, prompts, system, effort, max_out, label):
+    """JSONL bauen (je Prompt eine Zeile), hochladen, Batch anlegen. Gibt (Batch-ID, Prompts je Schlüssel) zurück."""
+    lines, keyed = [], {}
+    for i, p in enumerate(prompts, 1):
+        key = f"prompt-{i}"
+        keyed[key] = p
+        body = openai_request(model, pdf_ids, p, system, effort, max_out)
+        lines.append(json.dumps({"custom_id": key, "method": "POST", "url": OPENAI_ENDPOINT, "body": body},
+                                ensure_ascii=False))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = DATA_DIR / f"requests_openai_{int(time.time())}.jsonl"
+    path.write_text("\n".join(lines), "utf-8")
+    with path.open("rb") as f:
+        jf = client.files.create(file=f, purpose="batch")
+    batch = client.batches.create(input_file_id=jf.id, endpoint=OPENAI_ENDPOINT, completion_window="24h",
+                                  metadata={"description": label[:512]})
+    return batch.id, keyed
+
+
+def openai_error_text(err):
+    """Fehlerobjekt der API ({"code": …, "message": …}) als Text."""
+    if isinstance(err, dict):
+        return ": ".join(str(err[k]) for k in ("code", "message") if err.get(k)) or json.dumps(err, ensure_ascii=False)
+    return str(err)
+
+
+def parse_openai_line(o, prompts):
+    """Eine Ergebniszeile des OpenAI-Batches (Ausgabe- oder Fehlerdatei) in eine Tabellenzeile überführen, in der Form
+    von parse_line(). OpenAI rechnet Denk-Token in output_tokens ein, die Zeile trennt sie: „Ausgabe“ ohne Denken."""
+    key = o.get("custom_id", "?")
+    resp = o.get("response") or {}
+    body = resp.get("body") or {}
+    parts = [c for item in body.get("output") or [] if item.get("type") == "message" for c in item.get("content") or []]
+    text = "".join(c.get("text", "") for c in parts if c.get("type") == "output_text")
+    refusal = " ".join(c.get("refusal", "") for c in parts if c.get("type") == "refusal").strip()
+    status, why = body.get("status"), (body.get("incomplete_details") or {}).get("reason")
+    if not status:  # Fehlerzeile oder Fehlerrumpf statt einer Antwort
+        finish = "unbekannt"
+    elif status == "incomplete":
+        # wie bei Gemini „MAX_TOKENS“, damit die Warnung in show_rows() greift
+        finish = "MAX_TOKENS" if why == "max_output_tokens" else why or status
+    else:
+        finish = "STOP" if status == "completed" else status
+    err = o.get("error") or body.get("error")
+    if err:
+        err = openai_error_text(err)
+    elif resp.get("status_code") not in (None, 200):
+        err = f"HTTP {resp['status_code']}"
+    elif refusal and not text:
+        err = f"Das Modell hat abgelehnt: {refusal}"
+    elif not text:
+        err = f"Keine Antwort (Abschlussgrund: {finish})"
+    usage = body.get("usage") or {}
+    think = pick(usage.get("output_tokens_details") or {}, "reasoning_tokens")
+    return {
+        "key": key,
+        "prompt": prompts.get(key, ""),
+        "text": text,
+        "model": body.get("model") or "unbekannt",
+        "finish": finish,
+        "usage": usage,
+        "error": err,
+        "in": pick(usage, "input_tokens"),
+        "cached": pick(usage.get("input_tokens_details") or {}, "cached_tokens"),
+        "think": think,
+        "out": max(pick(usage, "output_tokens") - think, 0),
+    }
+
+
+def fetch_openai_batch(client, j):
+    """Stand eines OpenAI-Batches als (Status, Zeilen, Fehlertext, Modell). Hat er einen Endzustand, werden Ausgabe- und
+    Fehlerdatei geladen. Bei Ablauf oder Abbruch enthalten sie die bis dahin fertigen Antworten und die Fehler."""
+    b = client.batches.retrieve(j["name"])
+    rows = None
+    if b.status in DONE:
+        raw = b"\n".join(client.files.content(fid).read() for fid in (b.output_file_id, b.error_file_id) if fid)
+        rows = parse_results(raw, j["prompts"], parse_openai_line) if raw.strip() else None
+    errors = []  # Fehler des ganzen Batches, z. B. ein überschrittenes Token-Limit der Warteschlange
+    for e in (b.errors.data if b.errors and b.errors.data else []):
+        where = f" (Zeile {e.line})" if e.line else ""
+        errors.append(openai_error_text({"code": e.code, "message": e.message}) + where)
+    return b.status, rows, "; ".join(errors) or None, b.model
+
+
+def cancel_batch(client, j):
+    if entry_provider(j) == PROVIDER_OPENAI:
+        client.batches.cancel(j["name"])
+    else:
+        client.batches.cancel(name=j["name"])
 
 
 # ---------- Synchroner Modus (Hintergrund-Thread, kein Streamlit-Aufruf darin) ----------
@@ -589,20 +749,26 @@ def job_panel(client, rt, j, polling):
         return sync_panel(rt, j["name"], polling)
     name = j["name"]
     errn_key, err_key = f"errn:{name}", f"err:{name}"
+    no_client = client is None  # der API-Key des Anbieters dieses Eintrags fehlt
+    if no_client:
+        st.warning(f"Der {entry_provider(j)} API-Key fehlt (Seitenleiste): Die Knöpfe „Status prüfen“ und "
+                   "„Batch abbrechen“ sind gesperrt. Gesicherte Ergebnisse bleiben sichtbar.")
     b1, b2, _ = st.columns([1, 1, 3])
-    manual = b1.button("Status prüfen / Ergebnisse laden", key="chk:" + name)
-    if b2.button("Batch abbrechen", key="cx:" + name):
+    manual = b1.button("Status prüfen / Ergebnisse laden", key="chk:" + name, disabled=no_client)
+    if b2.button("Batch abbrechen", key="cx:" + name, disabled=no_client):
         try:
-            client.batches.cancel(name=name)
+            cancel_batch(client, j)
             st.warning("Abbruch angefordert. Der Status wird gleich aktualisiert.")
         except Exception as e:
             st.error(f"Abbruch fehlgeschlagen: {e}")
-    if manual or polling:
+    if (manual or polling) and not no_client:
         try:
             refresh(client, j)
             st.session_state[errn_key] = 0
         except Exception as e:
-            fatal = getattr(e, "code", None) in (403, 404)  # Batch existiert nicht mehr oder ist nicht zugänglich
+            # Batch existiert nicht mehr oder ist nicht zugänglich. Den HTTP-Code meldet Gemini als code,
+            # OpenAI als status_code.
+            fatal = getattr(e, "code", None) in (403, 404) or getattr(e, "status_code", None) in (403, 404)
             st.session_state[errn_key] = MAX_POLL_ERRORS if fatal else st.session_state.get(errn_key, 0) + 1
             st.session_state[err_key] = str(e)
     info = batch_info(j)
@@ -617,7 +783,7 @@ def job_panel(client, rt, j, polling):
     if not info:
         return
     if "res:" + name not in st.session_state:
-        st.caption("Gesichertes Endergebnis aus data/batch_jobs.json, kein Abruf bei Google nötig.")
+        st.caption("Gesichertes Endergebnis aus data/batch_jobs.json, kein Abruf beim Anbieter nötig.")
     st.write(f"Status: **{info['state']}**, Modell laut API: **{info.get('model') or 'unbekannt'}**")
     if info["error"]:
         st.error(info["error"])
@@ -633,15 +799,24 @@ def fill_form(j, raw, group, text):
     """Callback-Hilfe: Formular „Neue Anfrage“ mit dem Prompt-Text raw und den Einstellungen eines Eintrags füllen
     und zu dem Tab wechseln. text beginnt den einmaligen Hinweis. Nur aus Callbacks aufrufen (Widget-Werte lassen
     sich nur setzen, bevor das Widget im Lauf erzeugt wurde)."""
-    ss, is_sync = st.session_state, j.get("mode") == "sync"
+    ss, is_sync, prov = st.session_state, j.get("mode") == "sync", entry_provider(j)
+    ss["provider"] = prov
+    if j.get("model"):
+        ss["model_openai" if prov == PROVIDER_OPENAI else "model_gemini"] = j["model"]
     ss["mode"] = MODE_SYNC if is_sync else MODE_BATCH
     ss["raw"] = raw
     ss["system"] = j.get("system", "")
-    if j.get("think") in THINK_LEVELS:
-        ss["think"] = j["think"]
-    if j.get("max_out"):
-        cap = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT) if is_sync else BATCH_MAX_OUT
-        ss["max_sync" if is_sync else "max_batch"] = max(256, min(int(j["max_out"]), cap))
+    if prov == PROVIDER_OPENAI:
+        if j.get("think") in OPENAI_EFFORTS:
+            ss["effort"] = j["think"]
+        if j.get("max_out"):
+            ss["max_openai"] = max(256, min(int(j["max_out"]), OPENAI_MAX_OUT))
+    else:
+        if j.get("think") in THINK_LEVELS:
+            ss["think"] = j["think"]
+        if j.get("max_out"):
+            cap = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT) if is_sync else BATCH_MAX_OUT
+            ss["max_sync" if is_sync else "max_batch"] = max(256, min(int(j["max_out"]), cap))
     if is_sync:
         ss["group"] = min(max(int(group or 1), 1), 50)
     pdfs = j.get("pdf")
@@ -666,7 +841,7 @@ def continue_conversation(j, turns):
 
 
 def delete_entry(name):
-    """Callback: Eintrag samt lokal gesicherter Ergebnisse aus dem Verlauf entfernen (bei Google bleibt alles)."""
+    """Callback: Eintrag samt lokal gesicherter Ergebnisse aus dem Verlauf entfernen (beim Anbieter bleibt alles)."""
     def change(jobs):
         jobs[:] = [x for x in jobs if x["name"] != name]
     mutate_jobs(runtime().lock, change)
@@ -681,12 +856,35 @@ if moved:
     print("Dateien einsortiert:", ", ".join(moved))
     st.toast("Dateien einsortiert: " + ", ".join(moved))
 with st.sidebar:
-    api_key = st.text_input("Gemini API-Key", os.getenv("GEMINI_API_KEY", ""), type="password")
-    model = st.text_input("Modell", DEFAULT_MODEL)
-if not api_key:
-    st.info("Trage links deinen API-Key ein oder setze die Umgebungsvariable GEMINI_API_KEY.")
+    provider = st.radio("Anbieter für neue Anfragen", PROVIDERS, key="provider", horizontal=True,
+                        help="Jeder Eintrag im Tab „Jobs und Ergebnisse“ gehört zu seinem Anbieter und wird mit "
+                             "dessen API-Key abgefragt. Beide Keys dürfen deshalb eingetragen bleiben.")
+    keys = {PROVIDER_GEMINI: st.text_input("Gemini API-Key", os.getenv("GEMINI_API_KEY", ""), type="password"),
+            PROVIDER_OPENAI: st.text_input("OpenAI API-Key", os.getenv("OPENAI_API_KEY", ""), type="password")}
+    if provider == PROVIDER_OPENAI:
+        st.session_state.setdefault("model_openai", DEFAULT_OPENAI_MODEL)
+        model = st.text_input("Modell", key="model_openai",
+                              help="Modellname laut OpenAI, zum Beispiel gpt-6-astra, gpt-6.1-sol oder gpt-6-luna. "
+                                   "Das Modell muss die Batch API und PDF-Eingaben unterstützen.")
+    else:
+        st.session_state.setdefault("model_gemini", DEFAULT_MODEL)
+        model = st.text_input("Modell", key="model_gemini")
+if not keys[provider]:
+    env_name = "OPENAI_API_KEY" if provider == PROVIDER_OPENAI else "GEMINI_API_KEY"
+    st.info(f"Trage links deinen {provider} API-Key ein oder setze die Umgebungsvariable {env_name}.")
     st.stop()
-client = genai.Client(api_key=api_key)
+
+
+def client_for(p):
+    """Client des Anbieters p, oder None, wenn dessen API-Key fehlt."""
+    return make_client(p, keys[p]) if keys[p] else None
+
+
+try:
+    client = client_for(provider)
+except RuntimeError as e:  # z. B. das Paket openai fehlt
+    st.error(f"Der {provider}-Client lässt sich nicht erstellen: {e}")
+    st.stop()
 rt = runtime()
 
 try:  # ab Streamlit 1.55 weiß die App, welcher Tab offen ist
@@ -699,7 +897,12 @@ with tab_new:
     note = st.session_state.pop("reused_note", None)
     if note:
         st.info(note)
-    mode = st.radio("Modus", [MODE_BATCH, MODE_SYNC], horizontal=True, key="mode")
+    if provider == PROVIDER_OPENAI:
+        mode = MODE_BATCH
+        st.caption("Mit OpenAI läuft nur der Batch-Modus (50 % Rabatt, Ergebnis innerhalb von 24 Stunden). "
+                   "Der synchrone Modus ist Gemini vorbehalten.")
+    else:
+        mode = st.radio("Modus", [MODE_BATCH, MODE_SYNC], horizontal=True, key="mode")
     sync = mode == MODE_SYNC
     uploads = st.file_uploader("PDF-Dateien (mehrere möglich)", type="pdf", accept_multiple_files=True)
     with st.container(border=True):
@@ -750,9 +953,23 @@ with tab_new:
         st.warning(f"Dein google-genai ({genai.__version__}) ist älter als 2.30.1, daher ist die Ausgabe auf "
                    f"{BATCH_MAX_OUT} Token begrenzt. Aktualisieren: pip install -U google-genai")
     c1, c2, c3 = st.columns(3)
-    st.session_state.setdefault("think", "high")
-    think = c1.selectbox("Denktiefe", THINK_LEVELS, key="think")
-    if sync:
+    if provider == PROVIDER_OPENAI:
+        st.session_state.setdefault("effort", "Standard")
+        think = c1.selectbox("Denktiefe", OPENAI_EFFORTS, key="effort",
+                             help="reasoning.effort der Responses API. „Standard“ sendet nichts, dann gilt die "
+                                  "Voreinstellung des Modells. Welche Stufen ein Modell kennt, hängt vom Modell ab "
+                                  "(z. B. kennt gpt-6-astra kein „none“). Andere Stufen lehnt die API ab, "
+                                  "der Fehler steht dann im Ergebnis.")
+    else:
+        st.session_state.setdefault("think", "high")
+        think = c1.selectbox("Denktiefe", THINK_LEVELS, key="think")
+    if provider == PROVIDER_OPENAI:
+        st.session_state.setdefault("max_openai", 32768)
+        max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=OPENAI_MAX_OUT, step=1024,
+                                  key="max_openai",
+                                  help="max_output_tokens. Denk-Token zählen zum Limit. Das Maximum hängt vom "
+                                       "Modell ab (bei den aktuellen Modellen bis 128.000).")
+    elif sync:
         cap = SYNC_MAX_OUT if sdk_ok else BATCH_MAX_OUT
         st.session_state.setdefault("max_sync", min(65536, cap))
         max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=cap, step=1024, key="max_sync",
@@ -762,7 +979,7 @@ with tab_new:
         st.session_state.setdefault("max_batch", BATCH_MAX_OUT)
         max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=BATCH_MAX_OUT, step=1024, key="max_batch",
                                   help="Im Batch-Betrieb begrenzt die API die Ausgabe auf 32768 Token.")
-    kind = "sync" if sync else "batch"
+    kind = "openai" if provider == PROVIDER_OPENAI else "sync" if sync else "batch"
     label = c3.text_input("Name", f"{kind}-{datetime.now():%Y%m%d-%H%M}", key="label_" + kind)
     talk_info = ""
     if sync and group > 1 and prompts:
@@ -781,6 +998,13 @@ with tab_new:
             "Rabattgarantie), die folgenden können davon profitieren. Die PDFs stehen in jeder Anfrage an erster Stelle. "
             "Es gilt der Standardpreis statt des Batch-Rabatts. Cache-Treffer siehst du unter „Jobs und Ergebnisse“."
             + talk_info
+        )
+    elif provider == PROVIDER_OPENAI:
+        st.caption(
+            f"{len(prompts)} Prompt(s) erkannt. Die OpenAI Batch API kostet 50 % des Standardpreises und liefert die "
+            "Ergebnisse innerhalb von 24 Stunden. Die PDFs stehen in jeder Anfrage an erster Stelle, damit der "
+            "Prefix für das automatische Caching (ab 1.024 Token) identisch ist. Treffer siehst du unter "
+            "„Jobs und Ergebnisse“."
         )
     else:
         st.caption(
@@ -805,11 +1029,19 @@ with tab_new:
                         unique.append((fname, data))
                 names, pdfs = [n for n, _ in unique], []
                 for k, (fname, data) in enumerate(unique, 1):
-                    status.update(label=f"Lade PDF {k} von {len(unique)} zu Gemini hoch …" + HINT)
-                    pdfs.append(upload_pdf(client, fname, data))
+                    status.update(label=f"Lade PDF {k} von {len(unique)} zu {provider} hoch …" + HINT)
+                    pdfs.append((upload_pdf_openai if provider == PROVIDER_OPENAI else upload_pdf)(client, fname, data))
                 status.update(label="Starte …" + HINT)
                 if sync:
                     entry = start_sync(client, rt, model, pdfs, names, prompts, system.strip(), think, max_out, label, group)
+                elif provider == PROVIDER_OPENAI:
+                    batch_id, keyed = start_openai_batch(client, model, [f.id for f in pdfs], prompts, system.strip(),
+                                                         think, max_out, label)
+                    entry = {"name": batch_id, "provider": PROVIDER_OPENAI, "label": label, "model": model,
+                             "pdf": ", ".join(names) or None, "pdfs": names, "prompts": keyed, "system": system.strip(),
+                             "think": think, "max_out": int(max_out),
+                             "created": datetime.now().isoformat(timespec="seconds")}
+                    mutate_jobs(rt.lock, lambda jobs: jobs.insert(0, entry))
                 else:
                     job, keyed = start_batch(client, model, pdfs, prompts, system.strip(), think, max_out, label)
                     entry = {"name": job.name, "label": label, "model": model, "pdf": ", ".join(names) or None,
@@ -837,8 +1069,9 @@ with tab_jobs:
             st.session_state.pop("sel", None)
         j = opts[st.selectbox("Eintrag", list(opts), key="sel")]
         is_sync = j.get("mode") == "sync"
-        grp = entry_group(j)
-        kind_txt = (f"synchron, {grp} Prompts pro Gespräch" if grp > 1 else "synchron") if is_sync else "Batch"
+        grp, entry_prov = entry_group(j), entry_provider(j)
+        kind_txt = ((f"synchron, {grp} Prompts pro Gespräch" if grp > 1 else "synchron") if is_sync
+                    else "Batch (OpenAI)" if entry_prov == PROVIDER_OPENAI else "Batch")
         st.caption(f"{j['name']}, {kind_txt}, gesendet: Modell {j['model']}, "
                    f"Denktiefe {j.get('think', 'unbekannt')}, max. {j.get('max_out', '?')} Ausgabe-Token, "
                    f"PDF: {j['pdf'] or 'keins'}, {len(j['prompts'])} Prompt(s)")
@@ -853,7 +1086,8 @@ with tab_jobs:
                   help="Übernimmt Prompts und Einstellungen ins Formular „Neue Anfrage“.")
         with a2.popover("Eintrag löschen", disabled=running):
             st.write("Entfernt den Eintrag samt lokal gesicherter Ergebnisse aus dem Verlauf. "
-                     "Bei Google bleibt alles unverändert.")
+                     "Beim Anbieter bleibt alles unverändert.")
             st.button("Ja, endgültig löschen", on_click=delete_entry, args=(j["name"],), key="del:" + j["name"])
-        polling = on_jobs_tab and running
-        st.fragment(run_every=POLL_SECONDS if polling else None)(job_panel)(client, rt, j, polling)
+        job_client = client if entry_prov == provider else client_for(entry_prov)  # jeder Eintrag mit seinem Anbieter
+        polling = on_jobs_tab and running and (is_sync or job_client is not None)
+        st.fragment(run_every=POLL_SECONDS if polling else None)(job_panel)(job_client, rt, j, polling)

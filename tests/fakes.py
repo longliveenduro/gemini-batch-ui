@@ -1,7 +1,8 @@
-"""Ersatz für die Google-Dienste. Nichts hier ruft das Netzwerk auf.
+"""Ersatz für die Google- und OpenAI-Dienste. Nichts hier ruft das Netzwerk auf.
 
-Die Antworten sind echte SDK-Objekte (types.GenerateContentResponse), damit der Code im Test dieselben Datenformen
-sieht wie in der Praxis. Aufrufe werden aufgezeichnet, damit Tests prüfen können, was die App gesendet hat.
+Die Antworten sind echte SDK-Objekte (types.GenerateContentResponse, openai.types.Batch), damit der Code im Test
+dieselben Datenformen sieht wie in der Praxis. Aufrufe werden aufgezeichnet, damit Tests prüfen können, was die App
+gesendet hat.
 """
 import json
 import time as real_time
@@ -9,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from google.genai import types
+from openai.types import Batch, FileObject
 
 
 class ApiError(Exception):
@@ -222,3 +224,164 @@ def install_drive(monkeypatch, home, drive):
                         staticmethod(lambda path, scopes: SimpleNamespace(valid=True)))
     monkeypatch.setattr(gd, "build", lambda *args, **kwargs: drive)
     return drive
+
+
+# ---------- OpenAI (Files API und Batch API) ----------
+class OpenAIError(Exception):
+    """Ähnelt openai.APIStatusError: trägt den HTTP-Code im Attribut status_code (code ist dort ein Text oder leer)."""
+
+    def __init__(self, status_code, message="Fehler"):
+        super().__init__(f"{status_code} {message}")
+        self.status_code = status_code
+        self.code = None
+
+
+def make_openai_body(text="Antwort", *, status="completed", incomplete=None, input_tokens=100, cached=0, reasoning=10,
+                     output=25, model="gpt-6-astra-2026-09-01", refusal=None, error=None):
+    """Antwortrumpf einer Responses-Anfrage, wie ihn die Ausgabedatei der Batch API enthält. output zählt wie bei OpenAI
+    die Denk-Token mit. Gültig nach dem Schema des SDK (openai.types.responses.Response), das prüft ein Test."""
+    if refusal:
+        content = [{"type": "refusal", "refusal": refusal}]
+    else:
+        content = [{"type": "output_text", "text": text, "annotations": []}] if text else []
+    return {
+        "id": "resp_fake", "object": "response", "created_at": 1790000000, "status": status, "model": model,
+        "output": [{"id": "rs_fake", "type": "reasoning", "summary": []},
+                   {"id": "msg_fake", "type": "message", "role": "assistant", "status": "completed", "content": content}],
+        "usage": {"input_tokens": input_tokens,
+                  "input_tokens_details": {"cached_tokens": cached, "cache_write_tokens": 0},
+                  "output_tokens": output, "output_tokens_details": {"reasoning_tokens": reasoning},
+                  "total_tokens": input_tokens + output},
+        "error": error, "incomplete_details": {"reason": incomplete} if incomplete else None, "instructions": None,
+        "metadata": {}, "parallel_tool_calls": True, "temperature": None, "tool_choice": "auto", "tools": [],
+        "top_p": None,
+    }
+
+
+class _OpenAIFiles:
+    def __init__(self, parent):
+        self.p = parent
+
+    def create(self, *, file, purpose, expires_after=None):
+        p = self.p
+        if p.upload_error:
+            raise p.upload_error
+        p.file_calls.append({"purpose": purpose, "expires_after": expires_after})
+        if purpose == "batch":  # JSONL-Datei eines Batches (geöffnete Datei)
+            p.jsonl_uploads.append(Path(file.name))
+            p.batch_requests = [json.loads(line) for line in file.read().decode("utf-8").splitlines() if line.strip()]
+            return FileObject(id="file-jsonl1", bytes=1, created_at=1790000000, filename=Path(file.name).name,
+                              object="file", purpose="batch", status="processed")
+        filename, stream, _mime = file  # PDF: (Name, Bytes-Strom, MIME-Typ)
+        p.uploads.append(stream.read())
+        p.upload_names.append(filename)
+        obj = FileObject(id=f"file-pdf{len(p.uploads)}", bytes=len(p.uploads[-1]), created_at=1790000000,
+                         filename=filename, object="file", purpose=purpose, status="processed")
+        p.pdf_files[obj.id] = obj
+        return obj
+
+    def retrieve(self, file_id):
+        p = self.p
+        if file_id in p.gone or file_id not in p.pdf_files:
+            raise OpenAIError(404, "No such file")
+        return p.pdf_files[file_id].model_copy(update={"status": p.file_status.get(file_id, "processed")})
+
+    def content(self, file_id):
+        p = self.p
+        p.content_calls.append(file_id)
+        data = p.output_bytes() if file_id == "file-out1" else p.error_bytes()
+        return SimpleNamespace(read=lambda: data)
+
+
+class _OpenAIBatches:
+    def __init__(self, parent):
+        self.p = parent
+
+    def create(self, *, input_file_id, endpoint, completion_window, metadata=None):
+        p = self.p
+        if p.create_error:
+            raise p.create_error
+        p.created_batches.append({"input_file_id": input_file_id, "endpoint": endpoint,
+                                  "completion_window": completion_window, "metadata": metadata})
+        return self.batch(f"batch_fake{len(p.created_batches):06d}", "validating")
+
+    def retrieve(self, batch_id):
+        self.p.get_calls += 1
+        if self.p.get_error:
+            raise self.p.get_error
+        return self.batch(batch_id, self.p.batch_status)
+
+    def cancel(self, batch_id):
+        self.p.cancelled.append(batch_id)
+        return self.batch(batch_id, "cancelling")
+
+    def batch(self, batch_id, status):
+        p = self.p
+        ended = status in ("completed", "expired", "cancelled")
+        keys = [r["custom_id"] for r in p.batch_requests]
+        ok = [k for k in keys if k not in p.failing]
+        return Batch.model_validate({
+            "id": batch_id, "object": "batch", "endpoint": "/v1/responses", "completion_window": "24h",
+            "created_at": 1790000000, "input_file_id": "file-jsonl1", "status": status,
+            "output_file_id": "file-out1" if ended and ok else None,
+            "error_file_id": "file-err1" if ended and p.failing else None,
+            "errors": {"object": "list", "data": p.batch_errors} if p.batch_errors else None,
+            "model": "gpt-6-astra-2026-09-01",
+            "request_counts": {"total": len(keys), "completed": len(ok), "failed": len(keys) - len(ok)},
+        })
+
+
+class FakeOpenAI:
+    """Ersatz für openai.OpenAI (Files API und Batch API).
+
+    batch_status: Status, den batches.retrieve meldet (validating, in_progress, completed, expired, cancelled, failed).
+    get_error, create_error, upload_error: Fehler von batches.retrieve, batches.create bzw. files.create.
+    batch_text, batch_cached: Antworttext und Cache-Token in der Ausgabedatei.
+    failing: {Schlüssel: Fehlerobjekt} der Anfragen, die statt in der Ausgabedatei in der Fehlerdatei stehen.
+    bodies: {Schlüssel: Argumente für make_openai_body} für einzelne Antworten (z. B. unvollständige).
+    batch_errors: Fehler des ganzen Batches (Liste von {code, message, line}), z. B. bei Status failed.
+    gone, file_status: IDs hochgeladener PDFs, die bei OpenAI fehlen (404), und abweichende Dateistatus.
+    """
+
+    def __init__(self, *, batch_status="completed", get_error=None, create_error=None, upload_error=None,
+                 batch_text=None, batch_cached=0, failing=None, bodies=None, batch_errors=None):
+        self.batch_status = batch_status
+        self.get_error, self.create_error, self.upload_error = get_error, create_error, upload_error
+        self.batch_text, self.batch_cached = batch_text, batch_cached
+        self.failing, self.bodies, self.batch_errors = dict(failing or {}), dict(bodies or {}), list(batch_errors or [])
+        self.client_kwargs = []  # Argumente der Client-Erzeugung (z. B. api_key)
+        self.uploads, self.upload_names, self.pdf_files = [], [], {}
+        self.jsonl_uploads, self.batch_requests, self.file_calls = [], [], []
+        self.created_batches, self.cancelled, self.content_calls = [], [], []
+        self.gone, self.file_status = set(), {}
+        self.get_calls = 0
+        self.files, self.batches = _OpenAIFiles(self), _OpenAIBatches(self)
+
+    def output_bytes(self):
+        lines = []
+        for req in self.batch_requests:
+            key = req["custom_id"]
+            if key in self.failing:
+                continue
+            args = {"text": self.batch_text or f"OpenAI-Antwort {key}", "cached": self.batch_cached,
+                    **self.bodies.get(key, {})}
+            lines.append(json.dumps({"id": f"batch_req_{key}", "custom_id": key, "error": None, "response": {
+                "status_code": 200, "request_id": f"req_{key}", "body": make_openai_body(**args)}}))
+        return ("\n".join(lines) + "\n").encode()
+
+    def error_bytes(self):
+        lines = [json.dumps({"id": f"batch_req_{key}", "custom_id": key, "response": None, "error": error})
+                 for key, error in self.failing.items()]
+        return ("\n".join(lines) + "\n").encode()
+
+
+def install_openai(monkeypatch, fake):
+    """Lässt openai.OpenAI immer den Fake liefern."""
+    import openai
+
+    def build_client(*args, **kwargs):
+        fake.client_kwargs.append(kwargs)
+        return fake
+
+    monkeypatch.setattr(openai, "OpenAI", build_client)
+    return fake
