@@ -75,6 +75,11 @@ OPENAI_EFFORTS = ["Standard", "none", "minimal", "low", "medium", "high", "xhigh
 OPENAI_ENDPOINT = "/v1/responses"  # Endpunkt der OpenAI Batch API (nimmt Denktiefe und PDFs als Datei-ID entgegen)
 OPENAI_MAX_OUT = 128_000   # größte Ausgabe-Obergrenze der aktuellen Modelle, je Modell kann sie niedriger sein
 OPENAI_FILE_TTL = 3 * 24 * 3600  # hochgeladene PDFs verfallen bei OpenAI nach 3 Tagen (erlaubt: 1 Stunde bis 30 Tage)
+# Formularfelder mit Schlüssel. Streamlit vergisst den Wert eines Widgets, das einen Lauf lang fehlt (Felder des anderen
+# Anbieters, alles hinter st.stop()), und der Browser baut es dann mit dem Standardwert neu auf. Darum wird jeder Wert
+# vor dem Zeichnen neu zugewiesen: Das hält ihn am Leben und schickt ihn an den Browser.
+FORM_KEYS = ["model_gemini", "model_openai", "mode", "system", "raw", "group", "think", "effort", "max_batch",
+             "max_sync", "max_openai"]
 HINT = " (bitte den Tab nicht wechseln)"
 SEPARATOR = re.compile(r"^\s*---\s*$", re.M)  # eine Zeile nur mit --- trennt im Formular die Prompts
 # Gesprächsverlauf als Text („Gespräch fortsetzen“): Je Runde steht mein früherer Prompt und deine Antwort dazu.
@@ -855,6 +860,9 @@ moved = prepare_folders()
 if moved:
     print("Dateien einsortiert:", ", ".join(moved))
     st.toast("Dateien einsortiert: " + ", ".join(moved))
+for key in FORM_KEYS:  # hält die Werte am Leben und schickt sie beim erneuten Zeichnen an den Browser
+    if key in st.session_state:
+        st.session_state[key] = st.session_state[key]
 with st.sidebar:
     provider = st.radio("Anbieter für neue Anfragen", PROVIDERS, key="provider", horizontal=True,
                         help="Jeder Eintrag im Tab „Jobs und Ergebnisse“ gehört zu seinem Anbieter und wird mit "

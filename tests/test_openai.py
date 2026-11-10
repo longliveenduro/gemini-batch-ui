@@ -5,15 +5,16 @@ Gegen die echte OpenAI-API laufen diese Tests nicht: Wie sie sich verhält, steh
 """
 import hashlib
 import json
+import re
 import sys
 
 import pytest
 
 import helpers
 from fakes import FakeGemini, FakeOpenAI, OpenAIError, install, install_openai, make_openai_body
-from helpers import (MODE_BATCH, PROVIDER_GEMINI, PROVIDER_OPENAI, TAB_JOBS, TAB_NEW, batch_entry, button, captions,
-                     click, finished_batch, finished_openai_batch, markdown, new_app, new_openai_app, openai_entry,
-                     read_history, set_prompts, write_history)
+from helpers import (APP_PATH, MODE_BATCH, PROVIDER_GEMINI, PROVIDER_OPENAI, TAB_JOBS, TAB_NEW, batch_entry, button,
+                     captions, click, finished_batch, finished_openai_batch, markdown, new_app, new_openai_app,
+                     openai_entry, read_history, set_prompts, write_history)
 
 ui = pytest.mark.ui
 PDF = "application/pdf"
@@ -383,6 +384,125 @@ def test_a_missing_openai_package_is_reported_instead_of_crashing(monkeypatch):
     at = new_openai_app()
     at.run()
     assert not at.exception and any("pip install" in e.value for e in at.error) and not at.button
+
+
+# ---------- Oberfläche: Formularwerte beim Anbieterwechsel ----------
+# Streamlit vergisst den Wert eines Widgets, das einen Lauf lang fehlt, und der Browser baut es dann mit dem Standardwert
+# neu auf (Modellfeld leer, Token-Limit 256, Denktiefe „Standard“). AppTest sieht nur den Wert im Backend, der stimmt
+# auch ohne Gegenmaßnahme. Darum prüfen diese Tests, was die App dem Browser schickt: set_value samt Wert im Protokoll.
+def sent_to_browser(widget, expected):
+    """Der Wert steht im Backend und geht beim Zeichnen mit set_value an den Browser."""
+    assert widget.value == expected
+    assert widget.proto.set_value is True, f"{widget.key}: Der Browser würde das Feld mit dem Standardwert aufbauen"
+
+
+@ui
+def test_the_default_model_is_shown_again_after_a_visit_to_openai_without_its_key(use_gemini, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "")  # mit leerem Key endet der OpenAI-Lauf hinter der Seitenleiste (st.stop)
+    use_gemini()
+    at = new_app()
+    at.run()
+    at.radio(key="provider").set_value(PROVIDER_OPENAI)
+    at.run()
+    assert any("OPENAI_API_KEY" in i.value for i in at.info) and not at.button  # der Formularbereich fehlt in diesem Lauf
+    at.radio(key="provider").set_value(PROVIDER_GEMINI)
+    at.run()
+    assert not at.exception
+    model = at.text_input(key="model_gemini")
+    sent_to_browser(model, "gemini-4-argon")
+    assert model.proto.value == "gemini-4-argon"  # nicht leer
+    assert at.number_input(key="max_batch").proto.value == 32768  # nicht der Mindestwert des Feldes
+    sent_to_browser(at.selectbox(key="think"), "high")
+
+
+@ui
+def test_the_form_values_survive_a_visit_to_openai_without_its_key(use_gemini, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    use_gemini()
+    at = new_app()
+    at.run()
+    at.text_input(key="model_gemini").set_value("mein-eigenes-modell")
+    at.selectbox(key="think").set_value("low")
+    at.number_input(key="max_batch").set_value(4096)
+    at.text_area(key="system").set_value("Sei kurz.")
+    set_prompts(at, "Erster Prompt")
+    at.radio(key="provider").set_value(PROVIDER_OPENAI)
+    at.run()
+    at.radio(key="provider").set_value(PROVIDER_GEMINI)
+    at.run()
+    assert not at.exception
+    for widget, expected in ((at.text_input(key="model_gemini"), "mein-eigenes-modell"),
+                             (at.selectbox(key="think"), "low"), (at.number_input(key="max_batch"), 4096),
+                             (at.text_area(key="system"), "Sei kurz."), (at.text_area(key="raw"), "Erster Prompt"),
+                             (at.radio(key="mode"), MODE_BATCH)):
+        sent_to_browser(widget, expected)
+    assert at.text_input(key="model_gemini").proto.value == "mein-eigenes-modell"
+    assert at.text_area(key="raw").proto.value == "Erster Prompt"
+    assert at.number_input(key="max_batch").proto.value == 4096
+
+
+@ui
+def test_each_provider_keeps_its_own_settings_when_switching_back_and_forth(use_gemini, use_openai):
+    use_gemini()
+    use_openai()
+    at = new_app()
+    at.run()
+    at.text_input(key="model_gemini").set_value("mein-eigenes-modell")
+    at.selectbox(key="think").set_value("low")
+    at.number_input(key="max_batch").set_value(4096)
+    at.run()
+    at.radio(key="provider").set_value(PROVIDER_OPENAI)
+    at.run()
+    at.text_input(key="model_openai").set_value("gpt-6-luna")
+    at.selectbox(key="effort").set_value("high")
+    at.number_input(key="max_openai").set_value(65536)
+    at.run()
+    for _ in range(2):  # zweimal hin und her: Beide Anbieter behalten ihre eigenen Werte
+        at.radio(key="provider").set_value(PROVIDER_GEMINI)
+        at.run()
+        assert not at.exception
+        sent_to_browser(at.text_input(key="model_gemini"), "mein-eigenes-modell")
+        sent_to_browser(at.selectbox(key="think"), "low")
+        sent_to_browser(at.number_input(key="max_batch"), 4096)
+        at.radio(key="provider").set_value(PROVIDER_OPENAI)
+        at.run()
+        assert not at.exception
+        sent_to_browser(at.text_input(key="model_openai"), "gpt-6-luna")
+        sent_to_browser(at.selectbox(key="effort"), "high")
+        sent_to_browser(at.number_input(key="max_openai"), 65536)
+
+
+@ui
+def test_the_synchronous_settings_survive_a_visit_to_the_other_provider(use_gemini, use_openai):
+    use_gemini()
+    use_openai()
+    at = new_app()
+    at.run()
+    at.radio(key="mode").set_value(helpers.MODE_SYNC)
+    at.run()
+    at.number_input(key="group").set_value(3)
+    at.number_input(key="max_sync").set_value(8192)
+    at.run()
+    at.radio(key="provider").set_value(PROVIDER_OPENAI)
+    at.run()
+    at.radio(key="provider").set_value(PROVIDER_GEMINI)
+    at.run()
+    assert not at.exception
+    sent_to_browser(at.radio(key="mode"), helpers.MODE_SYNC)
+    sent_to_browser(at.number_input(key="group"), 3)
+    sent_to_browser(at.number_input(key="max_sync"), 8192)
+
+
+def test_every_form_widget_with_a_key_is_kept_alive_between_runs(app):
+    """Wer ein Formularfeld mit Schlüssel ergänzt, muss es in FORM_KEYS aufnehmen (sonst vergisst Streamlit den Wert,
+    sobald das Feld einen Lauf lang fehlt). Ausnahmen stehen hier mit Begründung."""
+    ui_part = APP_PATH.read_text("utf-8").split("# ---------- UI ----------")[1]
+    used = set(re.findall(r'\bkey="([a-z_]+)"', ui_part))
+    exempt = {"provider": "steht vor jedem st.stop() und fehlt nie",
+              "view": "der Tab-Zustand hält Streamlit selbst",
+              "sel": "Auswahl im Jobs-Tab: Ihre Optionen ändern sich, ein alter Wert wäre dort ungültig",
+              "label_": "Namensfeld je Modus: hat selbst einen Standardwert (neuer Name), ein Verlust schadet nicht"}
+    assert used - set(exempt) == set(app.FORM_KEYS), "FORM_KEYS und die Schlüssel der Formularfelder weichen ab"
 
 
 # ---------- Oberfläche: Start ----------
