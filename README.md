@@ -1,11 +1,11 @@
-# Gemini 4 Argon: Batch- und Synchron-UI
+# Gemini 4 Carbon: Batch- und Synchron-UI
 
-Lokale Streamlit-Oberfläche, um **Gemini 4 Argon** (`gemini-4-argon`) oder ein **OpenAI-Modell** (z. B. `gpt-6-astra`) mit **einem oder mehreren PDFs** und **vielen Prompts** zu benutzen. Es gibt zwei Betriebsarten:
+Lokale Streamlit-Oberfläche, um **Gemini 4 Carbon** (`gemini-4-carbon`, der Vorgänger `gemini-4-argon` lässt sich im Feld „Modell“ weiter eintragen) oder ein **OpenAI-Modell** (z. B. `gpt-6-astra`) mit **einem oder mehreren PDFs** und **vielen Prompts** zu benutzen. Es gibt zwei Betriebsarten:
 
 - **Batch** (Gemini und OpenAI): asynchron, 50 % des Standardpreises, Ergebnis nach Minuten bis Stunden (bei OpenAI innerhalb von 24 Stunden).
 - **Synchron** (nur Gemini): Prompts laufen nacheinander im Hintergrund, mit Aussicht auf Cache-Treffer für das PDF. Optional bilden je N Prompts ein Gespräch (gemeinsamer Kontext).
 
-Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34, Gemini 4 Argon). Alle Aussagen zur Google-API gelten für diesen Stand. Die Aussagen zur OpenAI-Anbindung beruhen auf der OpenAI-Dokumentation vom 10.11.2026 (openai 3.46). Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
+Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34). Alle Aussagen zur Google-API gelten für diesen Stand, die zu Gemini 4 Carbon beruhen auf der Google-Dokumentation vom 11.11.2026. Die Aussagen zur OpenAI-Anbindung beruhen auf der OpenAI-Dokumentation vom 10.11.2026 (openai 3.46). Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
 
 ## Inhalt
 
@@ -36,7 +36,7 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34,
 - **Nachvollziehbar**: pro Antwort Modell, Abschlussgrund, Eingabe-, Cache-, Denk- und Ausgabe-Token, Dauer und rohe Nutzungsdaten.
 - **Robust**: Batches laufen bis zu 24 Stunden, synchrone Läufe im Hintergrund. Beides überlebt Tab-Wechsel und Seiten-Neuladen. Ergebnisse werden lokal gesichert.
 
-**Nicht-Ziele**: Mehrbenutzerbetrieb, Hosting im Netz, Anmeldung, Kostenabrechnung, explizites Caching (Argon unterstützt es nicht, siehe Abschnitt 5).
+**Nicht-Ziele**: Mehrbenutzerbetrieb, Hosting im Netz, Anmeldung, Kostenabrechnung, explizites Caching (Carbon und Argon unterstützen es nicht, siehe Abschnitt 5).
 
 **Herkunft.** Die Idee war ein kleines Streamlit-Werkzeug für den Batch-Betrieb mit dem Gemini-Batch-API. Daraus wurde eine Ein-Datei-App. Die Oberfläche ist deutsch.
 
@@ -99,7 +99,7 @@ Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden
 
 **Erster Lauf in 60 Sekunden**
 
-1. Seitenleiste: Anbieter wählen (Gemini oder OpenAI), API-Key prüfen, Modell (`gemini-4-argon` bzw. `gpt-6-astra`).
+1. Seitenleiste: Anbieter wählen (Gemini oder OpenAI), API-Key prüfen, Modell (`gemini-4-carbon` bzw. `gpt-6-astra`).
 2. Tab „Neue Anfrage“: Modus wählen (nur bei Gemini), PDF hochladen, Prompts eintragen (mehrere mit `---` auf eigener Zeile trennen).
 3. „Batch starten“ oder „Synchron starten“. Der neue Eintrag ist danach im Tab „Jobs und Ergebnisse“ vorausgewählt.
 
@@ -111,7 +111,7 @@ Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden
 |---|---|
 | Anbieter für neue Anfragen | `Gemini` (Voreinstellung) oder `OpenAI`. Das Formular „Neue Anfrage“ passt sich an: Mit OpenAI entfallen der Modus (es gibt nur Batch) und „Prompts pro Gespräch“, und die Denktiefe kennt die Stufen von OpenAI. Einträge im Tab „Jobs und Ergebnisse“ werden unabhängig von dieser Wahl mit dem Anbieter und dem Key abgefragt, zu denen sie gehören. Beim Hin- und Herwechseln merkt sich die App die Werte beider Anbieter (Modell, Denktiefe, Token-Limit), Prompts und Systemanweisung gelten für beide. |
 | Gemini API-Key, OpenAI API-Key | Vorbelegt aus `GEMINI_API_KEY` bzw. `OPENAI_API_KEY`, beide dürfen eingetragen bleiben. Fehlt der Key des gewählten Anbieters, bleibt die App stehen und sagt es. Fehlt der Key des Anbieters eines Verlaufseintrags, sind dort „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“ gesperrt, gesicherte Ergebnisse bleiben sichtbar. |
-| Modell | Freitext, je Anbieter ein eigenes Feld (Voreinstellung `gemini-4-argon` bzw. `gpt-6-astra`). Bei OpenAI muss das Modell die Batch API und PDF-Eingaben unterstützen. |
+| Modell | Freitext, je Anbieter ein eigenes Feld (Voreinstellung `gemini-4-carbon` bzw. `gpt-6-astra`). Bei OpenAI muss das Modell die Batch API und PDF-Eingaben unterstützen. |
 
 ### Tab „Neue Anfrage“
 
@@ -123,7 +123,7 @@ Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden
 | Systemanweisung | Optional, gilt für jede Anfrage. |
 | Prompts | Ein Textfeld, mehrere Prompts durch eine Zeile nur mit `---` trennen. Beginnt ein Prompt mit einem Gesprächsverlauf (aus „Gespräch fortsetzen“), steht der neue Prompt unter `[Mein neuer Prompt]`. Solange dort nichts steht, ist der Start gesperrt. |
 | Prompts pro Gespräch | Nur synchron. 1 = jeder Prompt für sich. 2 = je zwei Prompts bilden ein Gespräch (der zweite sieht den ersten und dessen Antwort), die nächsten zwei ein neues usw. Das PDF geht in jedem Gespräch mit dem ersten Prompt raus. |
-| Denktiefe | Gemini: „Standard“ (kein Parameter, Argon nutzt dann `medium`), `low`, `medium`, `high`. Voreinstellung `high`. OpenAI: „Standard“ (kein Parameter, es gilt die Voreinstellung des Modells), `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Voreinstellung „Standard“. Welche Stufen ein Modell kennt, hängt vom Modell ab (z. B. kennt `gpt-6-astra` kein `none`). Die API lehnt andere ab, der Fehler steht dann je Prompt im Ergebnis. |
+| Denktiefe | Gemini: „Standard“ (kein Parameter, Carbon nutzt dann `medium`), `low`, `medium`, `high`. Voreinstellung `high`. Carbon denkt länger als Argon: `medium` ist laut Google für die meisten Aufgaben richtig, `high` verbraucht die meisten Token. OpenAI: „Standard“ (kein Parameter, es gilt die Voreinstellung des Modells), `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Voreinstellung „Standard“. Welche Stufen ein Modell kennt, hängt vom Modell ab (z. B. kennt `gpt-6-astra` kein `none`). Die API lehnt andere ab, der Fehler steht dann je Prompt im Ergebnis. |
 | Max. Ausgabe-Token | Gemini-Batch: bis 32.768 (Voreinstellung 32.768). Gemini synchron: bis 1.048.576 (Voreinstellung 65.536), über 32.768 setzt das SDK automatisch Long Decode ein. OpenAI: bis 128.000 (Voreinstellung 32.768), je nach Modell darunter. Denk-Token zählen zum Limit. |
 | Name | Bezeichnung des Eintrags im Verlauf. |
 | Start-Button | Lädt PDFs hoch, sendet bzw. startet. Während dieser Vorbereitung nicht den Tab wechseln, sonst bricht der Start ab. |
@@ -158,19 +158,22 @@ Ohne angehängtes PDF werden die Prompts ohne PDF gesendet (steht als Hinweis im
 
 ## 5. Kosten sparen: Batch, Caching, Gespräche
 
-### Argon-Besonderheiten (laut Google-Doku, Stand Oktober 2026)
+### Carbon-Besonderheiten (laut Google-Doku, Stand 11.11.2026)
+
+Carbon (`gemini-4-carbon`, seit 10.11.2026) und sein Vorgänger Argon haben laut Google dieselbe Schnittstelle, dieselben Denkstufen, dasselbe Kontextfenster und denselben Preis. Der Umstieg ist deshalb nur ein anderer Modellname. Der Unterschied: Carbon verbraucht bei schweren Aufgaben mehr Denk-Token und braucht länger. Die Tabelle gilt für beide Modelle, wo nichts anderes steht. Ältere Verlaufseinträge behalten ihr Modell (z. B. `gemini-4-argon`), „Eingaben übernehmen“ trägt es im Feld „Modell“ wieder ein.
 
 | Thema | Verhalten | Folge in der App |
 |---|---|---|
-| Modell-ID | `gemini-4-argon` | Voreinstellung im Feld „Modell“ |
+| Modell-ID | `gemini-4-carbon` (Vorgänger: `gemini-4-argon`) | Voreinstellung im Feld „Modell“ |
 | Denktiefe | `thinking_level` ∈ {`low`, `medium`, `high`}, Standard `medium` | Auswahl „Denktiefe“, „Standard“ sendet nichts |
-| Denk-Token | zählen zum Limit `max_output_tokens`, werden bei Gemini-Modellen üblicherweise wie Ausgabe-Token berechnet (Preisseite prüfen) | Warnung bei `MAX_TOKENS` |
-| Explizites Caching | wird für Argon nicht unterstützt und liefert einen Fehler | kein `cached_content` in der App |
+| Denk-Token | zählen zum Limit `max_output_tokens` und werden wie Ausgabe-Token berechnet (Preisseite). Carbon kann mehr davon verbrauchen als Argon. Google empfiehlt ein Limit ab 32.768, zum Sparen die Denktiefe zu senken | Warnung bei `MAX_TOKENS`, Voreinstellungen 32.768 (Batch) und 65.536 (synchron) |
+| Explizites Caching | wird für Carbon (wie für Argon) nicht unterstützt, Aufrufe mit `cached_content` entfallen | kein `cached_content` in der App |
 | Implizites Caching | automatisch ab 4.096 Token, gecachte Eingabe-Token 95 % günstiger, keine Garantie | PDFs ganz vorn in fester Reihenfolge |
 | Batch | JSONL-Datei mit Zeilen `{"key", "request"}`, 50 % des Standardpreises, Ziel 24 Stunden, Ergebnisse 6 Wochen abrufbar | Batch-Modus |
-| Batch-Ausgabelimit | 32.768 Token, kein Long Decode (API-Fehler sonst: „max_output_tokens cannot exceed 32768“) | Feld im Batch-Modus begrenzt |
+| Batch-Ausgabelimit | 32.768 Token, kein Long Decode (API-Fehler sonst: „max_output_tokens cannot exceed 32768“). Beobachtet bei Argon, für Carbon nennt die Doku keinen anderen Wert (ungeprüft) | Feld im Batch-Modus begrenzt |
 | Ausgabe pro Anfrage | 32.768 (nicht streamend), 65.536 (streamend). Mit google-genai ≥ 2.30.1 setzt das SDK automatisch fort (Long Decode), bis 1.048.576 | Feld im Sync-Modus bis 1.048.576 |
-| Timeouts | mindestens 20 Minuten pro Aufruf empfohlen | `SYNC_TIMEOUT_MS` = 25 Minuten |
+| Timeouts | mindestens 15 bis 20 Minuten pro Aufruf empfohlen (Carbon denkt länger als Argon) | `SYNC_TIMEOUT_MS` = 25 Minuten |
+| Preis | wie Argon. Standard je 1 Mio. Token: 2 $ Eingabe und 10 $ Ausgabe (inklusive Denk-Token) bis 30.11.2026, ab 01.12.2026 4 $ und 20 $. Batch: die Hälfte | keine Kostenanzeige in der App (Preisseite prüfen) |
 | Thought Signatures | Modellantwort unverändert in den Verlauf zurückgeben | Gespräche übernehmen `candidates[0].content` unverändert |
 
 ### Cache-Strategie der App
@@ -186,13 +189,13 @@ Implizites Caching vergleicht den **Anfang (Prefix)** einer Anfrage mit frühere
 - Andere PDF-Menge oder -Reihenfolge, andere Systemanweisung oder anderes Modell ergeben einen anderen Prefix und damit keine Treffer.
 - Hochgeladene PDFs werden über ihren SHA-256 in `data/pdf_files.json` gemerkt, damit dieselbe Datei-Referenz (URI) auch nach einem Neustart benutzt wird, solange die Files API sie noch hält (derzeit 48 Stunden). Ob Google intern Dateiinhalt oder Datei-Referenz vergleicht, ist nicht dokumentiert. Eine gleiche Referenz ist der sicherere Weg.
 - **Synchron** sendet strikt nacheinander. Die erste Anfrage füllt den Cache (zeigt meist „Cache 0“), die folgenden können treffen. Zeitliche Nähe hilft, eine Garantie gibt es nicht.
-- **Batch** läuft asynchron, die Verarbeitungszeitpunkte bestimmt Google. Zu implizitem Caching im Batch steht in der Doku nichts. Die Batch-Doku nennt Caching dort nur über `cached_content` (explizit, bei Argon nicht möglich).
+- **Batch** läuft asynchron, die Verarbeitungszeitpunkte bestimmt Google. Zu implizitem Caching im Batch steht in der Doku nichts. Die Batch-Doku nennt Caching dort nur über `cached_content` (explizit, bei Carbon nicht möglich).
 - **Gespräche** (Prompts pro Gespräch > 1): Der zweite Prompt sendet den ganzen Verlauf erneut (PDFs, erster Prompt, Antwort, zweiter Prompt). Der Anfang bis einschließlich erstem Prompt ist identisch zur vorherigen Anfrage und kann gecacht werden. Die neue Antwort und der neue Prompt werden normal berechnet. Jedes neue Gespräch beginnt wieder mit denselben PDFs, deshalb kann das PDF auch über Gesprächsgrenzen hinweg gecacht werden.
 - Sicher sparen lässt sich nur, wenn das PDF gar nicht mehrfach gesendet wird (mehrere Fragen in einem Prompt) oder mit einem Modell, das explizites Caching unterstützt. Beides ist in der App nicht eingebaut.
 
 ### Beobachtung aus der Praxis
 
-Erster echter Batch (19.10.2026): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token, Denk-Token 2.188 bis 3.359, Ausgabe-Token 1.133 bis 1.827. **Cache-Token: überall 0.** Das deckt sich mit der Annahme, dass Batch bei Argon keine verlässlichen impliziten Treffer liefert. Ob die API das Feld in Batch-Ergebnissen unter anderem Namen führt, lässt sich im einklappbaren `usage`-JSON jeder Antwort prüfen (die App liest `cachedContentTokenCount`, `cached_content_token_count`, `totalCachedTokens`, `total_cached_tokens`).
+Erster echter Batch (19.10.2026, noch mit Argon): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token, Denk-Token 2.188 bis 3.359, Ausgabe-Token 1.133 bis 1.827. **Cache-Token: überall 0.** Das deckt sich mit der Annahme, dass Batch bei Argon keine verlässlichen impliziten Treffer liefert. Für Carbon liegt noch keine eigene Beobachtung vor. Ob die API das Feld in Batch-Ergebnissen unter anderem Namen führt, lässt sich im einklappbaren `usage`-JSON jeder Antwort prüfen (die App liest `cachedContentTokenCount`, `cached_content_token_count`, `totalCachedTokens`, `total_cached_tokens`).
 
 ### OpenAI-Besonderheiten (laut OpenAI-Doku, Stand 10.11.2026)
 
@@ -217,14 +220,14 @@ Die **Cache-Strategie** (Reihenfolge `[Systemanweisung] [PDF 1] [PDF 2] … [Pro
 
 - Seitenleiste „Gemini API-Key“ und „OpenAI API-Key“ (Passwortfelder) oder die Umgebungsvariablen `GEMINI_API_KEY` und `OPENAI_API_KEY` (werden als Vorbelegung genutzt). Die Keys werden nicht gespeichert. Gebraucht wird der Key des gewählten Anbieters, dazu der des anderen Anbieters, wenn man dessen Verlaufseinträge abfragen will.
 - Seitenleiste „Anbieter für neue Anfragen“: `Gemini` (Voreinstellung) oder `OpenAI`.
-- Seitenleiste „Modell“, je Anbieter ein eigenes Feld. Gemini, Voreinstellung `gemini-4-argon`: Andere Modelle sind möglich, aber die App ist auf Argon zugeschnitten (Batch-Limit, `thinking_level`-Werte, Caching-Annahmen). OpenAI, Voreinstellung `gpt-6-astra`: Jedes Modell mit Responses API, Batch API und PDF-Eingabe geht, etwa `gpt-6.1-sol` oder `gpt-6-luna` (Namen laut OpenAI-Doku, Stand 10.11.2026).
+- Seitenleiste „Modell“, je Anbieter ein eigenes Feld. Gemini, Voreinstellung `gemini-4-carbon`: Andere Modelle sind möglich (z. B. `gemini-4-argon`, laut Google schneller und mit weniger Denk-Token), aber die App ist auf die Gemini-4-Modelle zugeschnitten (Batch-Limit, `thinking_level`-Werte, Caching-Annahmen). OpenAI, Voreinstellung `gpt-6-astra`: Jedes Modell mit Responses API, Batch API und PDF-Eingabe geht, etwa `gpt-6.1-sol` oder `gpt-6-luna` (Namen laut OpenAI-Doku, Stand 10.11.2026).
 - Optional die Umgebungsvariable `GEMINI_UI_HOME`: Ordner, unter dem `conf/` und `data/` liegen. Voreinstellung ist der Projektordner (der Ordner über `src/`), unabhängig vom Arbeitsordner. Nützlich für getrennte Datenbestände und für Tests.
 
 ### 6.2 Konstanten im Code (Kopf von `src/gemini_batch_ui.py`)
 
 | Konstante | Wert | Bedeutung |
 |---|---|---|
-| `DEFAULT_MODEL` | `gemini-4-argon` | Voreinstellung Modell |
+| `DEFAULT_MODEL` | `gemini-4-carbon` | Voreinstellung Modell |
 | `DEFAULT_OPENAI_MODEL` | `gpt-6-astra` | Voreinstellung Modell bei OpenAI |
 | `PROVIDER_GEMINI`, `PROVIDER_OPENAI` | „Gemini“, „OpenAI“ | Anbieter. `PROVIDER_OPENAI` steht auch im Feld `provider` der OpenAI-Einträge |
 | `PROVIDERS` | beide Anbieter | Auswahl in der Seitenleiste, Voreinstellung ist der erste |
@@ -349,7 +352,7 @@ Batch-Eintrag (Felder `state`, `rows`, `error`, `api_model` kommen erst, wenn de
 {
   "name": "batches/9bo5q27hzqyh6unvm1z9slccnav15hnkybmy",
   "label": "batch-20261019-1437",
-  "model": "gemini-4-argon",
+  "model": "gemini-4-carbon",
   "pdf": "Buch 1.pdf, Buch 2.pdf",
   "pdfs": ["Buch 1.pdf", "Buch 2.pdf"],
   "prompts": {"prompt-1": "…", "prompt-2": "…"},
@@ -360,7 +363,7 @@ Batch-Eintrag (Felder `state`, `rows`, `error`, `api_model` kommen erst, wenn de
   "state": "JOB_STATE_SUCCEEDED",
   "rows": [],
   "error": null,
-  "api_model": "models/gemini-4-argon"
+  "api_model": "models/gemini-4-carbon"
 }
 ```
 
@@ -389,7 +392,7 @@ Synchroner Eintrag (Zeilen wachsen live):
   "mode": "sync",
   "state": "RUNNING",
   "label": "sync-20261028-1430",
-  "model": "gemini-4-argon",
+  "model": "gemini-4-carbon",
   "pdf": "Buch.pdf",
   "pdfs": ["Buch.pdf"],
   "prompts": {"prompt-1": "…", "prompt-2": "…"},
@@ -411,7 +414,7 @@ Eine Zeile in `rows` (alle Modi und Anbieter, erzeugt von `parse_line()` bzw. be
   "key": "prompt-1",
   "prompt": "…",
   "text": "Antworttext ohne Denk-Teile",
-  "model": "gemini-4-argon",
+  "model": "gemini-4-carbon",
   "finish": "STOP",
   "usage": {"promptTokenCount": 80259, "cachedContentTokenCount": 0, "thoughtsTokenCount": 2188, "candidatesTokenCount": 1133},
   "error": null,
@@ -605,7 +608,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 7. **Keine verschachtelten Expander** (Streamlit verbietet es). Popover in Spalten ist erlaubt.
 8. **Fragmente**: Argumente sind in Timer-Läufen veraltet, Timer mit `st.rerun()` beenden, Zustände für Abbruchbedingungen aus Datei oder Session lesen.
 9. **Fehler verständlich melden** (deutsch, mit Hinweis, was zu tun ist). Geheimnisse (API-Key, Tokens) nie loggen oder speichern.
-10. **Modellverhalten nicht raten.** Bei neuen Parametern die aktuelle Google-Doku prüfen und im Zweifel die rohen `usage`-Daten und Fehlermeldungen der API ansehen. Argon hat Eigenheiten (Abschnitt 5).
+10. **Modellverhalten nicht raten.** Bei neuen Parametern die aktuelle Google-Doku prüfen und im Zweifel die rohen `usage`-Daten und Fehlermeldungen der API ansehen. Carbon und Argon haben Eigenheiten (Abschnitt 5).
 11. **Stil**: deutsche Oberflächentexte und Kommentare, 4 Leerzeichen, Zeilen bis etwa 120 Zeichen, flache Funktionen, Docstrings kurz.
 
 ### 9.2 Rezepte
@@ -616,7 +619,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 2. In `start_batch()` in das Dict `gen` aufnehmen, in `run_sync()` in `types.GenerateContentConfig(...)`, bei OpenAI in `openai_request()`.
 3. Wert im Eintrag speichern (`start_sync()` bzw. das Batch-Eintrags-Dict im Start-Handler).
 4. `reuse_inputs()` und die Beschriftung im Jobs-Tab erweitern.
-5. Testen (9.3). In der Argon-Doku prüfen, ob der Parameter noch wirkt.
+5. Testen (9.3). In der Carbon-Doku prüfen, ob der Parameter noch wirkt.
 
 **Neuen Modus hinzufügen (z. B. ein weiterer Rabatt-Tarif)**
 
@@ -636,7 +639,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 **Neues Ergebnisfeld anzeigen**: Feld in `parse_line()` berechnen, in `show_rows()` ausgeben (mit `.get()`), bei Bedarf in den Markdown-Download aufnehmen.
 
-**Explizites Caching für andere Modelle**: Für Argon nicht möglich. Für Modelle, die es unterstützen, wäre der Weg: Cache mit den PDFs anlegen (`client.caches.create(...)` mit Laufzeit), im Request nur noch `cached_content` referenzieren und die PDFs weglassen, Speicherkosten und Mindestgrößen beachten. Als Umschalter nur anzeigen, wenn das Modell es kann. Garantiert die Ersparnis, kostet aber Speicherzeit.
+**Explizites Caching für andere Modelle**: Für Carbon und Argon nicht möglich. Für Modelle, die es unterstützen, wäre der Weg: Cache mit den PDFs anlegen (`client.caches.create(...)` mit Laufzeit), im Request nur noch `cached_content` referenzieren und die PDFs weglassen, Speicherkosten und Mindestgrößen beachten. Als Umschalter nur anzeigen, wenn das Modell es kann. Garantiert die Ersparnis, kostet aber Speicherzeit.
 
 **Weitere Ideen** stehen in Abschnitt 11.
 
@@ -776,7 +779,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - OpenAI gibt es nur im **Batch-Modus**. Der synchrone Modus (samt „Prompts pro Gespräch“) ist Gemini vorbehalten, weil er an Gemini-Typen und Gemini-Caching hängt.
 - Die gültigen Denktiefen sind bei OpenAI nicht je Modell hinterlegt, weil sie sich schnell ändern: Die Auswahl zeigt alle Stufen, unpassende lehnt die API je Prompt ab.
 - OpenAI bekommt PDFs mit Text und Seitenbildern, die Detailstufe (`detail`) ist nicht einstellbar. Die Eingabe-Token können sich deshalb von denen bei Gemini unterscheiden.
-- Implizites Caching ist nicht garantiert und bei Argon die einzige Cache-Art. Im Batch gibt es dazu keine Doku, synchron ist es bestmöglich vorbereitet, aber unbewiesen.
+- Implizites Caching ist nicht garantiert und bei Carbon (wie bei Argon) die einzige Cache-Art. Im Batch gibt es dazu keine Doku, synchron ist es bestmöglich vorbereitet, aber unbewiesen.
 - Synchron läuft **sequenziell**. Parallele Anfragen würden Cache-Treffer am Anfang eher verhindern.
 - Der Start (Dateien laden, hochladen) läuft im Hauptskript. Ein Tab-Wechsel währenddessen bricht ihn ab (im Statusfeld vermerkt).
 - Die Sperre in `runtime()` gilt nur innerhalb **eines** Streamlit-Prozesses. Nicht zwei Instanzen im selben Ordner starten.
@@ -795,7 +798,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Streaming der Antworten im synchronen Modus mit Zwischenständen im Eintrag.
 - Eingaben des Formulars beim Neustart wiederherstellen.
 - Fortsetzung als echter Mehr-Runden-Verlauf (`user`/`model`-Nachrichten statt Text im Prompt). Dazu müsste der Eintrag die Modellantworten samt Denk-Signaturen speichern.
-- Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Argon anbietet (Doku prüfen).
+- Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Carbon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
 - Aufräumen alter `data/requests_*.jsonl` (und `data/requests_openai_*.jsonl`).
 - OpenAI: Detailstufe der PDF-Seitenbilder (`detail`) wählbar machen, synchroner Modus über die Responses API, Modellvorschläge aus der Modellliste der API statt Freitext.
@@ -819,13 +822,16 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - „Gespräch fortsetzen“ und die Prompt-Anzeige wurden zusätzlich einmal in einem echten Headless-Chromium gegen die laufende App mit Ersatzdiensten durchgespielt (Klick im Fragment, Tab-Wechsel, Hinweis, Startsperre, zweites Fortsetzen ohne Verschachtelung). Dieser Browsertest gehört nicht zur Testsuite.
 - Der Anbieterwechsel (Gemini, OpenAI, zurück zu Gemini, mit leerem und mit gesetztem OpenAI-Key, auch bei geöffnetem Jobs-Tab) wurde ebenfalls in einem echten Headless-Chromium gegen die laufende App durchgespielt. Modell, Denktiefe, Token-Limit, Prompts und Systemanweisung blieben erhalten, beide Anbieter behielten ihre eigenen Werte. Ohne die Zuweisung vor dem Zeichnen (`FORM_KEYS`) standen nach dem Rückwechsel das Modellfeld leer, das Token-Limit auf 256, die Denktiefe auf „Standard“, und Prompts und Systemanweisung fehlten. Auch dieser Browsertest gehört nicht zur Testsuite.
 - Der GitHub-Workflow (Abschnitt 9.5) wurde mit `actionlint` geprüft, und seine Befehle liefen wie oben beschrieben in frischen Umgebungen. Auf GitHub selbst lief er noch nicht.
-- Mit der echten API bestätigt: Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige (19.10.2026). Dabei meldeten alle Antworten Cache 0.
+- Mit der echten API bestätigt (19.10.2026, noch mit Argon): Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige. Dabei meldeten alle Antworten Cache 0.
+- **Umstellung auf Gemini 4 Carbon: nur anhand der Google-Dokumentation (11.11.2026) und mit den simulierten Diensten der Testsuite geprüft**, nicht gegen die echte API. Geändert wurden der Modellname (`DEFAULT_MODEL`), Beschriftungen und die Doku. Anfrageformat, `thinking_level`-Werte, SDK-Mindestversion (2.30.1 für `generate_content`) und Token-Limits blieben unverändert, weil Google den Umstieg von Argon als reinen Modellnamenwechsel beschreibt.
 - **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, „Gespräch fortsetzen“ (wie das Modell auf einen Prompt mit eingefügtem Verlauf antwortet), Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - **OpenAI-Anbindung: nur mit simulierten Diensten getestet**, nicht gegen die echte OpenAI-API (in der Entwicklungsumgebung gab es weder Key noch Zugriff). `FakeOpenAI` liefert echte SDK-Objekte (`Batch`, `FileObject`), und ein Test stellt sicher, dass die Beispielantworten gültige `Response`-Objekte des SDK sind (openai 3.46.0). Feldnamen, Endpunkt, Parameter und die erlaubten Denktiefen stammen aus der OpenAI-Dokumentation und dem SDK. Ungeprüft, bitte beim ersten echten Einsatz beobachten: ob ein Batch am Endpunkt `/v1/responses` PDFs per `file_id` (`input_file`) annimmt (die gelesenen Dokumentationsstellen schließen es nicht aus, bestätigen es für Batches aber auch nicht), welche Denktiefen das gewählte Modell kennt, ob Cache-Treffer im Batch vorkommen, die Fehlercodes der Fehlerdatei (die Beispiele in den Tests sind nicht aus echten Läufen) und die Meldung bei überschrittenem Warteschlangenlimit.
-- Ungeprüft: ob die Batch-Antworten für Argon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Argon exakt wie dokumentiert antwortet.
+- Ungeprüft, bisher nur mit Argon beobachtet oder dokumentiert: ob die Batch-Antworten für Carbon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der Batch bei Carbon dasselbe Ausgabelimit von 32.768 Token hat, ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Carbon exakt wie dokumentiert antwortet und ob die 25 Minuten Timeout für `high` reichen.
 
 **Quellen** (Stand Oktober 2026, bitte auf Änderungen prüfen)
 
+- Was ist neu in Gemini 4 Carbon (Modell-ID, Denktiefe, Long Decode, Umstieg von Argon, Stand 11.11.2026): <https://aistudio.google.com/docs/whats-new-gemini-4-carbon>
+- Preise für Gemini 4 Carbon und Argon (Standard, Batch, Stand 11.11.2026): <https://aistudio.google.com/docs/pricing>
 - Gemini 4 Argon, Modellseite: <https://ai.google.dev/gemini-api/docs/models/gemini-4-argon>
 - Was ist neu in Gemini 4 Argon (Denktiefe, Long Decode, Timeouts, Caching): <https://ai.google.dev/gemini-api/docs/generate-content/latest-model>
 - Batch-API (JSONL-Format, Preis, Aufbewahrung): <https://ai.google.dev/gemini-api/docs/batch-api>
@@ -848,7 +854,7 @@ OpenAI (Stand 10.11.2026, bitte auf Änderungen prüfen):
 - **Responses API**: OpenAIs Schnittstelle für Textantworten. Die Batch API nimmt sie als Endpunkt `/v1/responses` und liefert Ausgabe- und Fehlerdatei.
 - **Prefix**: der gemeinsame Anfang zweier Anfragen. Implizites Caching greift darauf.
 - **Implizites Caching**: Google erkennt gleiche Anfänge automatisch und berechnet sie günstiger. Keine Zusage.
-- **Explizites Caching**: man legt selbst einen Cache an und referenziert ihn. Garantiert die Ersparnis, für Argon nicht verfügbar.
+- **Explizites Caching**: man legt selbst einen Cache an und referenziert ihn. Garantiert die Ersparnis, für Carbon und Argon nicht verfügbar.
 - **Long Decode**: automatische Fortsetzung über mehrere Teilanfragen, wenn die Ausgabe das Limit pro Anfrage überschreitet (SDK ab 2.30.1, nur synchron).
 - **Runde**: ein früherer Prompt samt deiner Antwort dazu. Ein Gesprächsverlauf besteht aus Runden (Abschnitt 7).
 - **Fragment**: ein Streamlit-Abschnitt, der sich allein neu ausführen kann (hier für die automatische Statusprüfung).

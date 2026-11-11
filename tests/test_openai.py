@@ -345,7 +345,7 @@ def test_switching_the_provider_in_the_sidebar_swaps_the_form(use_gemini, use_op
     at.radio(key="provider").set_value(PROVIDER_GEMINI)
     at.run()
     assert not at.exception and at.selectbox(key="think").value == "high" and at.radio(key="mode").value == MODE_BATCH
-    assert [t for t in at.text_input if t.label == "Modell"][0].value == "gemini-4-argon"
+    assert [t for t in at.text_input if t.label == "Modell"][0].value == "gemini-4-carbon"
 
 
 @ui
@@ -409,8 +409,8 @@ def test_the_default_model_is_shown_again_after_a_visit_to_openai_without_its_ke
     at.run()
     assert not at.exception
     model = at.text_input(key="model_gemini")
-    sent_to_browser(model, "gemini-4-argon")
-    assert model.proto.value == "gemini-4-argon"  # nicht leer
+    sent_to_browser(model, "gemini-4-carbon")
+    assert model.proto.value == "gemini-4-carbon"  # nicht leer
     assert at.number_input(key="max_batch").proto.value == 32768  # nicht der Mindestwert des Feldes
     sent_to_browser(at.selectbox(key="think"), "high")
 
