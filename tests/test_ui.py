@@ -255,7 +255,7 @@ def test_a_finished_batch_is_saved_locally_and_reopens_without_the_api(use_fake,
     at.run()
     at.run()
     saved = read_history(home)[0]
-    assert saved["state"] == "JOB_STATE_SUCCEEDED" and saved["api_model"] == "models/gemini-4-argon"
+    assert saved["state"] == "JOB_STATE_SUCCEEDED" and saved["api_model"] == "models/gemini-4-carbon"
     assert saved["rows"][0]["cached"] == 60 and saved["rows"][0]["text"] == "Batch-Antwort prompt-1"
 
     broken = use_fake(get_error=ApiError(500))  # neue Sitzung, API unbrauchbar: darf nicht gefragt werden
@@ -422,6 +422,7 @@ def test_folders_are_created_beside_src_whatever_the_working_directory(tmp_path,
 def test_entries_from_older_versions_still_open(use_fake, home):
     minimal_row = {"key": "prompt-1", "prompt": "Eins", "text": "Alte Antwort", "error": None,
                    "in": 5, "cached": 0, "think": 0, "out": 1}  # ohne model, finish, usage, secs
+    # Einträge von vor der Umstellung auf Carbon behalten ihr Modell (gemini-4-argon) und lassen sich weiter öffnen.
     write_history(home, [
         {"name": "batches/uralt000000", "label": "uralt", "model": "gemini-4-argon", "pdf": None,
          "prompts": {"prompt-1": "Eins"}, "created": "2026-10-01T09:00:00"},  # ohne think, max_out, system, pdfs, state

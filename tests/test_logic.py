@@ -17,7 +17,7 @@ def result_line(key="prompt-1", text="Hallo", finish="STOP", usage=None, parts=N
     if usage is None:
         usage = {"promptTokenCount": 100, "candidatesTokenCount": 5, "thoughtsTokenCount": 7}
     response = {"candidates": [{"content": {"parts": parts or [{"text": text}]}, "finishReason": finish}],
-                "usageMetadata": usage, "modelVersion": "gemini-4-argon"}
+                "usageMetadata": usage, "modelVersion": "gemini-4-carbon"}
     return {"key": key, "response": response, **extra}
 
 
@@ -32,7 +32,7 @@ def test_parse_line_reads_text_tokens_and_model(app):
     row = app.parse_line(result_line(), {"prompt-1": "Frage"})
     assert (row["key"], row["prompt"], row["text"]) == ("prompt-1", "Frage", "Hallo")
     assert (row["in"], row["cached"], row["think"], row["out"]) == (100, 0, 7, 5)
-    assert (row["model"], row["finish"], row["error"]) == ("gemini-4-argon", "STOP", None)
+    assert (row["model"], row["finish"], row["error"]) == ("gemini-4-carbon", "STOP", None)
     assert row["usage"]["promptTokenCount"] == 100
 
 
@@ -256,7 +256,7 @@ PDFS = [SimpleNamespace(uri="https://example.test/v1beta/files/A"), SimpleNamesp
 
 def test_start_batch_builds_requests_with_pdfs_first(app, home):
     fake = FakeGemini()
-    job, keyed = app.start_batch(fake, "gemini-4-argon", PDFS, ["P1", "P2"], "Sei kurz.", "high", 32768, "lauf")
+    job, keyed = app.start_batch(fake, "gemini-4-carbon", PDFS, ["P1", "P2"], "Sei kurz.", "high", 32768, "lauf")
     assert keyed == {"prompt-1": "P1", "prompt-2": "P2"} and job.name.startswith("batches/")
     assert [r["key"] for r in fake.batch_requests] == ["prompt-1", "prompt-2"]
     request = fake.batch_requests[0]["request"]
@@ -271,16 +271,16 @@ def test_start_batch_builds_requests_with_pdfs_first(app, home):
 
 def test_start_batch_uploads_the_jsonl_into_the_data_folder_and_creates_the_batch(app, home):
     fake = FakeGemini()
-    app.start_batch(fake, "gemini-4-argon", PDFS, ["P1"], "", "high", 1024, "mein-lauf")
+    app.start_batch(fake, "gemini-4-carbon", PDFS, ["P1"], "", "high", 1024, "mein-lauf")
     assert fake.jsonl_uploads[0].parent == home.resolve() / "data"
     assert fake.jsonl_uploads[0].name.startswith("requests_") and fake.jsonl_uploads[0].suffix == ".jsonl"
     assert (fake.jsonl_configs[0].mime_type, fake.jsonl_configs[0].display_name) == ("jsonl", "mein-lauf")
-    assert fake.created_batches == [("gemini-4-argon", "files/jsonl1", {"display_name": "mein-lauf"})]
+    assert fake.created_batches == [("gemini-4-carbon", "files/jsonl1", {"display_name": "mein-lauf"})]
 
 
 def test_start_batch_standard_thinking_and_no_system_send_neither(app):
     fake = FakeGemini()
-    app.start_batch(fake, "gemini-4-argon", [], ["P1"], "", "Standard", 2048, "x")
+    app.start_batch(fake, "gemini-4-carbon", [], ["P1"], "", "Standard", 2048, "x")
     request = fake.batch_requests[0]["request"]
     assert request["generation_config"] == {"max_output_tokens": 2048}
     assert "system_instruction" not in request

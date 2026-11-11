@@ -22,7 +22,7 @@ class ApiError(Exception):
 
 
 def make_response(text="Antwort", finish="STOP", prompt_tokens=100, cached=0, thoughts=10, out=5,
-                  model="gemini-4-argon", empty=False):
+                  model="gemini-4-carbon", empty=False):
     """Echtes SDK-Antwortobjekt. empty=True liefert eine Antwort ohne Kandidaten (z. B. blockiert)."""
     candidates = None if empty else [types.Candidate(
         content=types.Content(role="model", parts=[types.Part(text=text)]), finish_reason=finish)]
@@ -76,7 +76,7 @@ class _Files:
                                 "finishReason": "STOP"}],
                 "usageMetadata": {"promptTokenCount": 100, "cachedContentTokenCount": p.batch_cached,
                                   "thoughtsTokenCount": 10, "candidatesTokenCount": 5},
-                "modelVersion": "gemini-4-argon"}}))
+                "modelVersion": "gemini-4-carbon"}}))
         return ("\n".join(lines) + "\n").encode()
 
 
@@ -95,7 +95,7 @@ class _Batches:
         if self.p.get_error:
             raise self.p.get_error
         return SimpleNamespace(state=SimpleNamespace(name=self.p.batch_state), error=None,
-                               model="models/gemini-4-argon", dest=SimpleNamespace(file_name="files/results"))
+                               model="models/gemini-4-carbon", dest=SimpleNamespace(file_name="files/results"))
 
     def cancel(self, name):
         self.p.cancelled.append(name)

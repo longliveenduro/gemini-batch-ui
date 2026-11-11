@@ -1,4 +1,4 @@
-"""Lokale Batch- und Synchron-UI für Gemini 4 Argon und OpenAI (Streamlit).
+"""Lokale Batch- und Synchron-UI für Gemini 4 Carbon und OpenAI (Streamlit).
 
 Start:    pip install -r requirements.txt && streamlit run src/gemini_batch_ui.py   (im Projektordner)
 API-Key:  Umgebungsvariablen GEMINI_API_KEY und OPENAI_API_KEY oder Seitenleiste.
@@ -56,7 +56,7 @@ OPENAI_FILES_DB = DATA_DIR / "openai_files.json"  # PDF-Hash -> ID der Datei in 
 PROVIDER_GEMINI = "Gemini"
 PROVIDER_OPENAI = "OpenAI"
 PROVIDERS = [PROVIDER_GEMINI, PROVIDER_OPENAI]  # Auswahl in der Seitenleiste, Voreinstellung ist der erste
-DEFAULT_MODEL = "gemini-4-argon"
+DEFAULT_MODEL = "gemini-4-carbon"
 DEFAULT_OPENAI_MODEL = "gpt-6-astra"
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 POLL_SECONDS = 10  # Abstand der automatischen Prüfung im Tab „Jobs und Ergebnisse“
@@ -64,7 +64,7 @@ DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_S
         "completed", "failed", "cancelled", "expired"}  # OpenAI (Status der Batch API, klein geschrieben)
 BATCH_MAX_OUT = 32768      # Batch-Anfragen unterstützen kein Long Decode
 SYNC_MAX_OUT = 1_048_576   # synchron: Long Decode über das SDK (ab google-genai 2.30.1)
-SYNC_TIMEOUT_MS = 25 * 60 * 1000  # Argon-Aufrufe können lange laufen (Doku: mindestens 20 Minuten)
+SYNC_TIMEOUT_MS = 25 * 60 * 1000  # Carbon denkt länger als Argon (Doku: Timeouts von mindestens 15 bis 20 Minuten)
 MAX_POLL_ERRORS = 3        # so viele Abruffehler hintereinander, dann stoppt die automatische Prüfung
 TABS = ["Neue Anfrage", "Jobs und Ergebnisse"]
 MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
@@ -98,7 +98,7 @@ TALK_MARK = re.compile(  # erkennt genau diese Marken (auch mit Leerzeichen davo
     r"|(?P<yours>Runde \d+: Deine Antwort dazu)|(?P<end>Ende des bisherigen Gesprächsverlaufs)"
     r"|(?P<new>Mein neuer Prompt))\][^\S\n]*$", re.M)
 
-st.set_page_config(page_title="Gemini Argon", layout="wide")
+st.set_page_config(page_title="Gemini Carbon", layout="wide")
 
 
 # ---------- Verlauf (Batches laufen bis zu 24 h, synchrone Läufe im Hintergrund: daher lokal gespeichert) ----------
@@ -1016,7 +1016,7 @@ with tab_new:
         )
     else:
         st.caption(
-            f"{len(prompts)} Prompt(s) erkannt. Batch kostet 50 % des Standardpreises. Argon unterstützt nur "
+            f"{len(prompts)} Prompt(s) erkannt. Batch kostet 50 % des Standardpreises. Carbon unterstützt nur "
             "implizites Caching (ab 4.096 Token, ohne Rabattgarantie): Die PDFs stehen in jeder Anfrage an erster "
             "Stelle, damit der Prefix identisch ist. Treffer siehst du unter „Jobs und Ergebnisse“."
         )

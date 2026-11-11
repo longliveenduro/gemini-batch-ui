@@ -43,7 +43,7 @@ def write_history(home, entries):
 
 
 def row(**over):
-    r = {"key": "prompt-1", "prompt": "Eins", "text": "Gesicherte Antwort", "model": "gemini-4-argon",
+    r = {"key": "prompt-1", "prompt": "Eins", "text": "Gesicherte Antwort", "model": "gemini-4-carbon",
          "finish": "STOP", "usage": {}, "error": None, "in": 10, "cached": 0, "think": 1, "out": 1}
     r.update(over)
     return r
@@ -51,7 +51,7 @@ def row(**over):
 
 def batch_entry(**over):
     """Frisch gestarteter Batch (noch ohne Endzustand)."""
-    e = {"name": "batches/abc123def456", "label": "altbatch", "model": "gemini-4-argon", "pdf": "a.pdf",
+    e = {"name": "batches/abc123def456", "label": "altbatch", "model": "gemini-4-carbon", "pdf": "a.pdf",
          "pdfs": ["a.pdf"], "prompts": {"prompt-1": "Eins"}, "system": "", "think": "high", "max_out": 32768,
          "created": "2026-10-19T14:38:00"}
     e.update(over)
@@ -60,7 +60,8 @@ def batch_entry(**over):
 
 def finished_batch(**over):
     """Batch mit lokal gesichertem Endergebnis."""
-    return batch_entry(state="JOB_STATE_SUCCEEDED", rows=[row()], error=None, api_model="models/gemini-4-argon", **over)
+    return batch_entry(state="JOB_STATE_SUCCEEDED", rows=[row()], error=None, api_model="models/gemini-4-carbon",
+                       **over)
 
 
 def openai_entry(**over):
@@ -78,7 +79,7 @@ def finished_openai_batch(**over):
 
 def sync_entry(**over):
     e = {"name": "sync-20261002-120000-bbbb", "mode": "sync", "state": "DONE", "label": "paar-lauf",
-         "model": "gemini-4-argon", "pdf": "a.pdf, b.pdf", "pdfs": ["a.pdf", "b.pdf"],
+         "model": "gemini-4-carbon", "pdf": "a.pdf, b.pdf", "pdfs": ["a.pdf", "b.pdf"],
          "prompts": {"prompt-1": "P1", "prompt-2": "P2"}, "system": "Sei kurz.", "think": "low", "max_out": 4096,
          "group": 2, "rows": [], "created": "2026-10-02T12:00:00"}
     e.update(over)

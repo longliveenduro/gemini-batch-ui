@@ -16,7 +16,7 @@ def run(app, rt, fake, prompts, *, group=1, n_pdfs=1, system="", think="high", m
     """Startet einen synchronen Lauf, wartet auf den Thread und liefert Eintrag, Zustand und Zeilen."""
     pdfs = [SimpleNamespace(uri=f"https://example.test/v1beta/files/{c}") for c in "ABC"[:n_pdfs]]
     names = [f"{c}.pdf" for c in "ABC"[:n_pdfs]]
-    entry = app.start_sync(fake, rt, "gemini-4-argon", pdfs, names, prompts, system, think, max_out, "lauf", group)
+    entry = app.start_sync(fake, rt, "gemini-4-carbon", pdfs, names, prompts, system, think, max_out, "lauf", group)
     thread = rt.threads[entry["name"]]
     thread.join(timeout=20)
     assert not thread.is_alive(), "Der Hintergrund-Thread ist nicht fertig geworden"
@@ -53,7 +53,7 @@ def test_generation_config_is_sent_with_every_request(app, rt):
         assert cfg.max_output_tokens == 65536
         assert cfg.http_options.timeout == app.SYNC_TIMEOUT_MS
         assert "Sei kurz." in str(cfg.system_instruction)
-    assert {c["model"] for c in fake.calls} == {"gemini-4-argon"}
+    assert {c["model"] for c in fake.calls} == {"gemini-4-carbon"}
 
 
 def test_standard_thinking_and_empty_system_send_neither(app, rt):
@@ -146,7 +146,7 @@ def test_rows_carry_usage_cache_model_and_duration(app, rt):
     fake = FakeGemini([{"text": "Fertig", "cached": 79000, "prompt_tokens": 80000, "thoughts": 2500, "out": 900}])
     row = run(app, rt, fake, ["P1"]).rows[0]
     assert (row["in"], row["cached"], row["think"], row["out"]) == (80000, 79000, 2500, 900)
-    assert (row["model"], row["finish"], row["text"]) == ("gemini-4-argon", "STOP", "Fertig")
+    assert (row["model"], row["finish"], row["text"]) == ("gemini-4-carbon", "STOP", "Fertig")
     assert row["usage"]["cachedContentTokenCount"] == 79000 and isinstance(row["secs"], int)
 
 
