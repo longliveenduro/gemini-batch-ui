@@ -113,7 +113,7 @@ def test_entry_label_format(app):
     ("2.30.1rc1", True),  # nicht auswertbar: im Zweifel nicht einschränken
 ])
 def test_sdk_has_long_decode(app, monkeypatch, version, expected):
-    monkeypatch.setattr(app.ns["genai"], "__version__", version)
+    monkeypatch.setattr(app.genai, "__version__", version)
     assert app.sdk_has_long_decode() is expected
 
 
@@ -125,16 +125,19 @@ def test_base_dir_prefers_environment_variable(app, home):
 
 def test_base_dir_defaults_to_the_project_folder_above_src(app, monkeypatch):
     monkeypatch.delenv("GEMINI_UI_HOME")
-    assert app._base_dir() == helpers.ROOT  # die App-Datei liegt in <Projektordner>/src/
+    assert app._base_dir() == helpers.ROOT  # das Paket gbui liegt in <Projektordner>/src/
 
 
 def test_base_dir_for_other_file_locations(app, monkeypatch, tmp_path):
     monkeypatch.delenv("GEMINI_UI_HOME")
-    app.ns["__file__"] = str(tmp_path / "projekt" / "src" / "gemini_batch_ui.py")  # Ordner „src“: der Ordner darüber
+    config = app.modules["config"]  # sein Ort bestimmt den Projektordner; gbui liegt neben dem Hauptskript
+    in_src = tmp_path / "projekt" / "src" / "gbui" / "config.py"  # Ordner „src“: der Ordner darüber
+    flat = tmp_path / "flach" / "gbui" / "config.py"  # älteres, flaches Layout: der Ordner mit gbui
+    monkeypatch.setattr(config, "__file__", str(in_src))
     assert app._base_dir() == (tmp_path / "projekt").resolve()
-    app.ns["__file__"] = str(tmp_path / "flach" / "gemini_batch_ui.py")  # älteres, flaches Layout: der eigene Ordner
+    monkeypatch.setattr(config, "__file__", str(flat))
     assert app._base_dir() == (tmp_path / "flach").resolve()
-    del app.ns["__file__"]  # ohne Dateiangabe (z. B. exec): der Arbeitsordner
+    monkeypatch.delattr(config, "__file__")  # ohne Dateiangabe (z. B. exec): der Arbeitsordner
     assert app._base_dir() == Path.cwd()
 
 
