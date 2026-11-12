@@ -6,7 +6,11 @@ from pathlib import Path
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_PATH = ROOT / "src" / "gemini_batch_ui.py"
+SRC_DIR = ROOT / "src"
+APP_PATH = SRC_DIR / "gemini_batch_ui.py"  # Hauptskript: nur die Oberfläche
+PACKAGE = "gbui"  # die Logik ohne Oberfläche, nach Thema in Module geteilt
+PACKAGE_DIR = SRC_DIR / PACKAGE
+SOURCE_FILES = [APP_PATH, *sorted(PACKAGE_DIR.glob("*.py"))]  # aller Quelltext der App
 
 # Texte der Oberfläche, auf die sich Tests stützen. test_logic prüft, dass sie mit der App übereinstimmen.
 PROVIDER_GEMINI, PROVIDER_OPENAI = "Gemini", "OpenAI"

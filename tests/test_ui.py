@@ -6,9 +6,9 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from fakes import ApiError, FakeDrive, FakeGemini, install, install_drive
-from helpers import (APP_PATH, MODE_BATCH, MODE_SYNC, TAB_JOBS, TAB_NEW, batch_entry, button, captions, click, finished_batch,
-                     markdown, new_app, read_history, row, set_prompts, sync_entry, wait_for_run_end, wait_until,
-                     write_history)
+from helpers import (APP_PATH, MODE_BATCH, MODE_SYNC, PACKAGE, PACKAGE_DIR, TAB_JOBS, TAB_NEW, batch_entry, button,
+                     captions, click, finished_batch, markdown, new_app, read_history, row, set_prompts, sync_entry,
+                     wait_for_run_end, wait_until, write_history)
 
 pytestmark = pytest.mark.ui
 
@@ -406,10 +406,13 @@ def test_folders_are_created_beside_src_whatever_the_working_directory(tmp_path,
     project = tmp_path / "projekt"
     (project / "src").mkdir(parents=True)
     shutil.copy(APP_PATH, project / "src" / "gemini_batch_ui.py")
+    package_copy = project / "src" / PACKAGE  # das Paket liegt neben dem Hauptskript
+    shutil.copytree(PACKAGE_DIR, package_copy, ignore=shutil.ignore_patterns("__pycache__"))
     elsewhere = tmp_path / "anderswo"
     elsewhere.mkdir()
     monkeypatch.delenv("GEMINI_UI_HOME")  # nur so zählt der Ort der Datei
     monkeypatch.chdir(elsewhere)
+    monkeypatch.syspath_prepend(str(project / "src"))  # wie streamlit run: der Ordner des Hauptskripts steht vorn
     use_fake()
     at = AppTest.from_file(str(project / "src" / "gemini_batch_ui.py"), default_timeout=30)
     at.run()

@@ -4,15 +4,16 @@ import os
 # Streamlit meldet im „bare mode“ (ohne laufende App) „missing ScriptRunContext“. Das ist hier erwartet und stört nur.
 os.environ.setdefault("STREAMLIT_LOGGER_LEVEL", "error")
 
+import importlib  # noqa: E402
+import pkgutil  # noqa: E402
+import sys  # noqa: E402
 import threading  # noqa: E402
 import time as real_time  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
-from helpers import APP_PATH, ROOT  # noqa: E402
-
-UI_MARKER = "# ---------- UI ----------"
+from helpers import PACKAGE, PACKAGE_DIR, ROOT  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -57,6 +58,22 @@ def no_real_api(monkeypatch):
     monkeypatch.setattr(openai, "OpenAI", refuse)
 
 
+def forget_package():
+    """Entfernt alle Module von gbui aus dem Importspeicher. Der nächste Import rechnet BASE, DATA_DIR usw. neu."""
+    for name in [n for n in sys.modules if n == PACKAGE or n.startswith(PACKAGE + ".")]:
+        del sys.modules[name]
+
+
+@pytest.fixture(autouse=True)
+def fresh_package(home):
+    """Die Module von gbui berechnen ihre Ordner beim Import aus GEMINI_UI_HOME. Damit jeder Test seinen eigenen Ordner
+    sieht, fliegen sie vor und nach jedem Test aus dem Importspeicher. Das gilt auch für die Oberflächentests: Deren
+    Hauptskript importiert die Module selbst, und zwar in jedem Test neu."""
+    forget_package()
+    yield
+    forget_package()
+
+
 class StubTime:
     """Ersatz für das Modul time: keine echten Pausen (sleep wird nur notiert), aber echte Uhr."""
 
@@ -71,32 +88,33 @@ class StubTime:
 
 
 class AppModule:
-    """Alles oberhalb der UI-Grenze der App als Objekt: app.parse_line(...), app.ns['time'] = ... für Ersatz."""
+    """Alle Module von gbui als ein Objekt: app.parse_line(...). Ein Name wird der Reihe nach in allen Modulen gesucht.
+    app.modules["config"] liefert ein Modul selbst, z. B. um dort etwas zu ersetzen."""
 
-    def __init__(self, ns):
-        self.ns = ns
+    def __init__(self, modules):
+        self.modules = modules
 
     def __getattr__(self, name):
-        try:
-            return self.ns[name]
-        except KeyError:
-            raise AttributeError(name) from None
+        for module in self.modules.values():
+            if name in vars(module):
+                return vars(module)[name]
+        raise AttributeError(name)
 
 
 @pytest.fixture
-def app(home):
-    """Die App ohne Oberfläche (Code oberhalb von „# ---------- UI ----------“), Ordner aus der Fixture home."""
-    head = APP_PATH.read_text("utf-8").split(UI_MARKER)[0]
-    ns = {"__name__": "appmod", "__file__": str(APP_PATH)}
-    exec(compile(head, str(APP_PATH), "exec"), ns)
-    return AppModule(ns)
+def app(fresh_package):
+    """Die Logik der App ohne Oberfläche (alle Module von gbui), Ordner aus der Fixture home."""
+    names = sorted(m.name for m in pkgutil.iter_modules([str(PACKAGE_DIR)]))
+    return AppModule({name: importlib.import_module(f"{PACKAGE}.{name}") for name in names})
 
 
 @pytest.fixture
-def fake_time(app):
-    """Ersetzt time in der App-Logik: Wiederholungs- und Wartepausen kosten keine Zeit."""
+def fake_time(app, monkeypatch):
+    """Ersetzt time in allen Modulen der App-Logik: Wiederholungs- und Wartepausen kosten keine Zeit."""
     stub = StubTime()
-    app.ns["time"] = stub
+    for module in app.modules.values():
+        if hasattr(module, "time"):
+            monkeypatch.setattr(module, "time", stub)
     return stub
 
 

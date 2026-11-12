@@ -496,7 +496,7 @@ def test_the_synchronous_settings_survive_a_visit_to_the_other_provider(use_gemi
 def test_every_form_widget_with_a_key_is_kept_alive_between_runs(app):
     """Wer ein Formularfeld mit Schlüssel ergänzt, muss es in FORM_KEYS aufnehmen (sonst vergisst Streamlit den Wert,
     sobald das Feld einen Lauf lang fehlt). Ausnahmen stehen hier mit Begründung."""
-    ui_part = APP_PATH.read_text("utf-8").split("# ---------- UI ----------")[1]
+    ui_part = APP_PATH.read_text("utf-8")  # das Hauptskript enthält nur die Oberfläche
     used = set(re.findall(r'\bkey="([a-z_]+)"', ui_part))
     exempt = {"provider": "steht vor jedem st.stop() und fehlt nie",
               "view": "der Tab-Zustand hält Streamlit selbst",
