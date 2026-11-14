@@ -4,17 +4,9 @@ import io
 import json
 import time
 
-from google import genai
 from google.genai import types
 
 from .config import DATA_DIR, FILES_DB
-
-
-def sdk_has_long_decode():
-    try:
-        return tuple(int(x) for x in genai.__version__.split(".")[:3]) >= (2, 30, 1)
-    except ValueError:
-        return True
 
 
 def upload_pdf(client, name, data):

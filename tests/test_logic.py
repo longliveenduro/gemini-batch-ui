@@ -109,15 +109,6 @@ def test_entry_label_format(app):
     assert app.entry_label(entry) == "Lauf (2026-10-19 14:38) def456"
 
 
-@pytest.mark.parametrize("version, expected", [
-    ("2.31.0", True), ("2.30.1", True), ("3.0.0", True), ("2.30.0", False), ("1.99.9", False),
-    ("2.30.1rc1", True),  # nicht auswertbar: im Zweifel nicht einschränken
-])
-def test_sdk_has_long_decode(app, monkeypatch, version, expected):
-    monkeypatch.setattr(app.genai, "__version__", version)
-    assert app.sdk_has_long_decode() is expected
-
-
 # ---------- Ordner ----------
 def test_base_dir_prefers_environment_variable(app, home):
     assert app._base_dir() == home.resolve()

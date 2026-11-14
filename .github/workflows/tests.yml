@@ -26,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.11 ist die Mindestversion der Abhängigkeiten, 3.12 die im Projekt genutzte Version.
-        python-version: ["3.11", "3.12"]
+        # 3.12 ist die Mindestversion und zugleich die im Projekt genutzte Version (README, Abschnitt 3).
+        python-version: ["3.12"]
     steps:
       - name: Code holen
         uses: actions/checkout@v7

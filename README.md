@@ -63,7 +63,7 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34)
 
 **Voraussetzungen**
 
-- Python 3.12 (vom Besitzer genutzt). Streamlit und google-genai verlangen derzeit mindestens Python 3.11.
+- Python 3.12 (vom Besitzer genutzt). Die App und die Tests unterstützen mindestens Python 3.12, außerdem mindestens Streamlit 1.67.0 und google-genai 3.3.0 (Abschnitt 6.5). Ältere Versionen werden weder unterstützt noch getestet.
 - Ein API-Key für den Anbieter, den man nutzt: Gemini (in Google AI Studio erzeugen) und/oder OpenAI (auf der OpenAI-Plattform erzeugen).
 - Optional für Drive: OAuth-Zugang, siehe 6.4.
 
@@ -80,8 +80,8 @@ Für die Tests zusätzlich `pip install -r requirements-dev.txt` (Abschnitt 9.3)
 `requirements.txt`:
 
 ```text
-streamlit>=1.55
-google-genai>=2.30.1
+streamlit>=1.67.0
+google-genai>=3.3.0
 openai>=1.100.0
 google-api-python-client
 google-auth-oauthlib
@@ -174,7 +174,7 @@ Carbon (`gemini-4-carbon`, seit 10.11.2026) und sein Vorgänger Argon haben laut
 | Implizites Caching | automatisch ab 4.096 Token, gecachte Eingabe-Token 95 % günstiger, keine Garantie | PDFs ganz vorn in fester Reihenfolge |
 | Batch | JSONL-Datei mit Zeilen `{"key", "request"}`, 50 % des Standardpreises, Ziel 24 Stunden, Ergebnisse 6 Wochen abrufbar | Batch-Modus |
 | Batch-Ausgabelimit | 32.768 Token, kein Long Decode (API-Fehler sonst: „max_output_tokens cannot exceed 32768“). Der Batch läuft über `generateContent` (nicht streamend: 32.768 je Anfrage), und die Interactions API, die 65.536 und Long Decode kennt, bietet laut Google noch keinen Batch. Beobachtet bei Argon, für Carbon nennt die Doku keinen anderen Wert (ungeprüft). Prüfen lässt es sich so: `BATCH_MAX_OUT` auf `65536` setzen und einen kleinen Batch starten, lehnt die API ab, erscheint der Fehler schon beim Start | Feld im Batch-Modus begrenzt |
-| Ausgabe pro Anfrage | `generateContent`: 32.768 (nicht streamend), 65.536 (streamend). Mit google-genai ≥ 2.30.1 setzt das SDK automatisch fort (Long Decode), bis 1.048.576 | Feld im Sync-Modus bis 1.048.576 |
+| Ausgabe pro Anfrage | `generateContent`: 32.768 (nicht streamend), 65.536 (streamend). Das SDK setzt automatisch fort (Long Decode), bis 1.048.576 | Feld im Sync-Modus bis 1.048.576 |
 | Hintergrund (Long Decode) | Interactions API: 65.536 je Interaktion, wenn `background` fehlt oder `max_output_tokens` nicht gesetzt ist (höhere Werte ohne `background=true` lehnt die API mit 400 ab). Mit `background=true` (verlangt `store=true`) und `max_output_tokens` über 65.536 setzen Googles Server die Antwort in Schritten zu je 64K Token fort, bis 1.048.576 minus Eingabe, Laufzeit bis 24 Stunden. Jedes Token jedes Schritts wird berechnet, wiederholte Eingabe ist durch implizites Caching 95 % günstiger. Google bewahrt Interaktionen bei kostenpflichtigen Konten bis zu 55 Tage auf (in AI Studio auf 7, 14, 28 oder 55 Tage einstellbar), bei kostenlosen 1 Tag | Modus „Hintergrund“, Feld bis 1.048.576, Voreinstellung 262.144 (Empfehlung der Doku für schwere Aufgaben) |
 | Timeouts | mindestens 15 bis 20 Minuten pro Aufruf empfohlen (Carbon denkt länger als Argon) | `SYNC_TIMEOUT_MS` = 25 Minuten |
 | Preis | wie Argon. Standard je 1 Mio. Token: 2 $ Eingabe und 10 $ Ausgabe (inklusive Denk-Token) bis 30.11.2026, ab 01.12.2026 4 $ und 20 $. Batch: die Hälfte | keine Kostenanzeige in der App (Preisseite prüfen) |
@@ -304,13 +304,14 @@ Hinweise:
 
 | Paket | Mindestversion | Wofür |
 |---|---|---|
-| `streamlit` | 1.55 | Oberfläche. Ab 1.55 kennt `st.tabs` den aktiven Tab (`key`, `on_change`, `.open`). Mit älteren Versionen läuft die App, prüft dann aber auch im anderen Tab. |
-| `google-genai` | 2.30.1 | Gemini-SDK. Ab 2.30.1 setzt `generate_content` Long Decode automatisch fort. Ältere Version: synchron auf 32.768 Ausgabe-Token begrenzt (die App warnt). |
+| `streamlit` | 1.67.0 | Oberfläche. `st.tabs` kennt mit `key` und `on_change` den aktiven Tab (`.open`), und `AppTest` unterstützt Datei-Uploads. Ältere Versionen werden nicht unterstützt. |
+| `google-genai` | 3.3.0 | Gemini-SDK. `generate_content` setzt Long Decode automatisch fort. Ältere Versionen werden nicht unterstützt. |
 | `openai` | 1.100.0 | OpenAI-SDK (Files API, Batch API). Ab 1.100.0 kennt `files.create` den Parameter `expires_after`, mit dem die App hochgeladene PDFs ablaufen lässt. Wird erst bei OpenAI-Nutzung importiert: Ohne das Paket läuft Gemini weiter, und die App meldet bei OpenAI, was fehlt. |
 | `google-api-python-client`, `google-auth-oauthlib` | beliebig | Drive-Zugriff (werden erst bei Drive-Nutzung importiert) |
-| `streamlit` (nur Tests) | 1.56 | `AppTest` unterstützt Datei-Uploads erst ab 1.56 (`requirements-dev.txt`). Die App selbst läuft ab 1.55 |
 | `pytest` | 8 | nur für die Tests (`requirements-dev.txt`) |
 | `pyyaml` | 6 | nur für die Tests (`requirements-dev.txt`), prüft die Workflow-Datei |
+
+Die Mindestversionen (Python 3.12, Streamlit 1.67.0, google-genai 3.3.0) sind die Versionen, mit denen die Testsuite zuletzt vollständig lief (Abschnitt 13). Ältere Versionen werden nicht unterstützt, der Code enthält keine Ausweichzweige dafür. Beim Anheben der Mindestversionen `requirements.txt`, die Voraussetzungen in Abschnitt 3 und, bei Python, die Matrix des Workflows (Abschnitt 9.5) mitziehen. `tests/test_docs.py` und `tests/test_ci.py` melden Abweichungen.
 
 ## 7. Lokale Dateien und Datenformate
 
@@ -551,7 +552,7 @@ Ein Modul von `gbui` importiert nur Module, die in dieser Tabelle über ihm steh
 | `src/gbui/history.py` | `runtime()` (prozessweit: `lock`, `threads`, `cancel`), `load_jobs()`, `mutate_jobs(lock, change)` |
 | `src/gbui/rows.py` | die gemeinsame Zeilenform: `pick()`, `parse_line()`, `parse_results()` (mit wählbarem Zeilenleser), für den Hintergrund-Modus `as_dict()` und `parse_interaction()` |
 | `src/gbui/drive.py` | `drive_service()` (OAuth, Neuanmeldung bei `RefreshError`), `drive_id()` (ID aus Link), `drive_fetch()` (PDF laden/exportieren) |
-| `src/gbui/gemini.py` | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`) |
+| `src/gbui/gemini.py` | `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`) |
 | `src/gbui/background.py` | Hintergrund-Modus (Interactions API, Long Decode): `interaction_request()` (Anfrage), `create_interaction()` (mit Wiederholung), `start_background()` (alle Prompts starten, Eintrag speichern), `fetch_background()` (Stand, Zeilen, Endzustand), `cancel_background()` |
 | `src/gbui/openai_batch.py` | `openai_client()` (lädt das Paket erst hier), `upload_pdf_openai()` (Files API + `data/openai_files.json`), `openai_request()` (Anfragerumpf), `start_openai_batch()` (JSONL bauen, hochladen, `batches.create`), `openai_error_text()`, `parse_openai_line()`, `fetch_openai_batch()` (Status, Ausgabe- und Fehlerdatei) |
 | `src/gbui/providers.py` | `make_client()`, `entry_provider()`, `entry_mode()` (`sync`, `background` oder `batch`), `refresh()` (Status + Ergebnisse laden, Endergebnis sichern, bei OpenAI-Einträgen über `fetch_openai_batch()`, bei Hintergrund-Einträgen über `fetch_background()`), `batch_info()`, `cancel_batch()` (je Anbieter und Modus) |
@@ -620,13 +621,12 @@ Abbruch  ──► cancel_batch() → cancel_background() → client.interaction
 
 ### Streamlit-Besonderheiten, die man kennen muss
 
-- **Tab-Erkennung**: `st.tabs(TABS, key="view", on_change="rerun")` (ab 1.55). `tab_jobs.open` sagt, ob der Jobs-Tab offen ist. Der Inhalt versteckter Tabs läuft trotzdem, gesteuert wird über `.open`. Ein Tab-Wechsel löst einen **vollständigen Rerun** aus. Das unterbricht jedes Skript, das gerade lange läuft (Uploads im Start-Handler). Lange Arbeit gehört deshalb in einen Hintergrund-Thread (siehe `start_sync`). Bei älteren Streamlit-Versionen schlägt der Aufruf mit `TypeError` fehl, der Fallback ist `st.tabs(TABS)`; `getattr(tab_jobs, "open", None) is not False` ergibt dann „immer prüfen“.
+- **Tab-Erkennung**: `st.tabs(TABS, key="view", on_change="rerun")`. `tab_jobs.open` sagt, ob der Jobs-Tab offen ist. Der Inhalt versteckter Tabs läuft trotzdem, gesteuert wird über `.open`. Ein Tab-Wechsel löst einen **vollständigen Rerun** aus. Das unterbricht jedes Skript, das gerade lange läuft (Uploads im Start-Handler). Lange Arbeit gehört deshalb in einen Hintergrund-Thread (siehe `start_sync`).
 - **Polling per Fragment**: `st.fragment(run_every=POLL_SECONDS if polling else None)(job_panel)(...)`. Die Entscheidung `polling` wird bei jedem vollen Lauf neu getroffen (Tab offen und Eintrag läuft). Um einen laufenden Timer zu beenden, ruft das Fragment `st.rerun()` auf (voller Rerun). Die Argumente eines Timer-Reruns sind **veraltet** (Stand des letzten vollen Laufs). Ein Fragment muss veränderliche Daten deshalb selbst neu laden (`sync_panel` liest den Eintrag aus der Datei, `job_panel` nutzt `batch_info()` und die Session).
 - **Button im Fragment, der das Formular füllt**: Ein Klick im Fragment (die Ergebnisse laufen in `job_panel`) löst nur einen Fragment-Lauf aus. „Gespräch fortsetzen“ füllt das Formular deshalb in einem **Callback** (`continue_conversation`: Widget-Werte lassen sich nur setzen, bevor das Widget im Lauf erzeugt wurde) und ruft danach `st.rerun()` auf, damit ein voller Lauf das Formular zeigt und den Tab wechselt. Im `AppTest` ist schon der erste Lauf voll. Dort verbraucht er den einmaligen Hinweis `reused_note`, im Browser erscheint er nach dem Rerun.
 - **Felder, die einen Lauf lang fehlen**: Streamlit vergisst den Wert eines Widgets, das in einem Lauf nicht gezeichnet wird (Felder des anderen Anbieters, alles hinter `st.stop()` bei fehlendem API-Key). Das Backend behält dabei teils noch Werte, der Browser baut das Feld aber mit dem Standardwert neu auf: Das Modellfeld war leer, „Max. Ausgabe-Token“ stand auf 256, die Denktiefe auf „Standard“, Prompts und Systemanweisung waren weg. Darum weist das Hauptskript jeden Wert aus `FORM_KEYS` vor dem Zeichnen neu zu (`st.session_state[key] = st.session_state[key]`). Das hält ihn am Leben und schickt ihn mit `set_value` an den Browser. `AppTest` sieht den Fehler nicht, weil es nur den Wert im Backend zeigt. Die Tests in `test_openai.py` prüfen deshalb, was die App dem Browser schickt (`proto.set_value`, Hilfsfunktion `sent_to_browser`). Namensfelder (`label_*`), die Auswahl im Jobs-Tab (`sel`), der Anbieterschalter und der Tab-Zustand (`view`) brauchen das nicht, ein Test hält die Ausnahmen fest.
 - **Threads**: `run_sync` läuft ohne `ScriptRunContext`. Dort **keine** `st.*`-Aufrufe und keine Streamlit-Cache-Funktionen. `rt = runtime()` wird im Hauptthread geholt und als Argument übergeben. Schreibzugriffe auf den Verlauf nur über `mutate_jobs(rt.lock, …)` (liest unter Sperre, schreibt atomar über `batch_jobs.tmp` + `os.replace`).
 - **Abbruch**: `rt.cancel` ist eine Menge von Eintragsnamen. `run_sync` prüft sie vor jedem Prompt. Eine laufende Anfrage wird nicht abgebrochen.
-- **Unbekannte Attribute**: `DeltaGenerator` liefert für unbekannte Namen ein aufrufbares Objekt statt `AttributeError`. Darum ist `getattr(…, "open", None) is not False` korrekt für ältere Versionen.
 - **Module und Hauptskript**: Streamlit führt das Hauptskript bei jedem Lauf neu aus, die Module von `gbui` dagegen nur beim ersten Import (danach kommen sie aus dem Importspeicher von Python). Darum steht auf Modulebene kein Streamlit-Aufruf außer Dekoratoren wie `@st.cache_resource` (ein Test prüft es), und `st.set_page_config` bleibt im Hauptskript, weil es der erste Streamlit-Aufruf sein muss. Konstanten wie `DATA_DIR` werden einmal je Prozess berechnet. Ändert man beim Entwickeln eine Datei von `gbui`, wirft Streamlit alle beobachteten Module aus dem Importspeicher, und der nächste Lauf importiert sie neu (nur mit Datei-Beobachter, siehe 6.3).
 - **Importpfad**: Beim Start mit `streamlit run` nimmt Streamlit den Ordner des Hauptskripts in `sys.path` auf, deshalb findet `import gbui` den Ordner daneben. `AppTest` tut das erst in neueren Versionen (in 1.56.0 noch nicht), darum trägt `pytest.ini` `src` mit `pythonpath = src` ein. Ein Test, der eine Kopie des Hauptskripts an einen anderen Ort stellt, ergänzt den Pfad selbst.
 
@@ -634,7 +634,7 @@ Abbruch  ──► cancel_batch() → cancel_background() → client.interaction
 
 | Schlüssel | Zweck |
 |---|---|
-| `view` | aktiver Tab (nur ab 1.55 wirksam). `reuse_inputs` und `continue_conversation` setzen ihn auf „Neue Anfrage“ |
+| `view` | aktiver Tab. `reuse_inputs` und `continue_conversation` setzen ihn auf „Neue Anfrage“ |
 | `provider` | Anbieter-Radio der Seitenleiste (`PROVIDERS`). `fill_form()` setzt es, wenn ein Eintrag übernommen wird |
 | `model_gemini`, `model_openai` | Modellfeld je Anbieter (`fill_form()` setzt es beim Übernehmen) |
 | `mode` | Modus-Radio (`MODE_BATCH` / `MODE_SYNC` / `MODE_BG`). Mit OpenAI wird es nicht angezeigt |
@@ -781,7 +781,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 **Wann.** Bei jedem Push, bei jedem Pull Request, auf Knopfdruck (Tab „Actions“ → „Tests“ → „Run workflow“) und einmal pro Woche (montags, 05:17 UTC). Der Wochenlauf ist gewollt: Die Abhängigkeiten stehen als `>=` in `requirements.txt`. Der Wochenlauf meldet, wenn eine neue Version von Streamlit oder google-genai etwas bricht.
 
-**Was.** Für jede Python-Version (3.11 als Mindestversion, 3.12 als genutzte Version) installiert der Lauf `requirements-dev.txt` und führt `python -m pytest` aus, also dasselbe wie lokal. Es braucht weder API-Key noch Secrets, denn alle Google-Dienste sind in den Tests ersetzt.
+**Was.** Für jede Python-Version der Matrix (derzeit nur 3.12, die Mindestversion und zugleich die genutzte Version) installiert der Lauf `requirements-dev.txt` und führt `python -m pytest` aus, also dasselbe wie lokal. Es braucht weder API-Key noch Secrets, denn alle Google-Dienste sind in den Tests ersetzt.
 
 **Einrichten.** Der Projektordner muss das Hauptverzeichnis des Repositorys sein, denn dort liegt `.github/`. Repository anlegen, pushen, danach erscheint im Tab „Actions“ der Lauf „Tests“. Ein Badge für die README:
 
@@ -793,15 +793,14 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 - Nur Leserechte (`permissions: contents: read`), keine Secrets, `persist-credentials: false` beim Auschecken.
 - Ein neuer Push bricht den noch laufenden Lauf desselben Branches ab (`concurrency`).
-- `fail-fast: false`: Schlägt Python 3.11 fehl, läuft 3.12 trotzdem zu Ende, damit man beide Ergebnisse sieht.
+- `fail-fast: false`: Enthält die Matrix mehrere Python-Versionen, läuft jede zu Ende, damit man alle Ergebnisse sieht (derzeit steht nur 3.12 darin).
 - Die Actions sind an Hauptversionen gebunden (`actions/checkout@v7`, `actions/setup-python@v6`, Stand November 2026). Neue Hauptversionen zieht man von Hand oder per Dependabot nach.
 
 **Pflegen.** Ändert sich die Mindest- oder die genutzte Python-Version in Abschnitt 3, muss die Matrix im Workflow mitziehen, sonst schlägt `tests/test_ci.py` an. Neue Test-Abhängigkeiten gehören in `requirements-dev.txt`, nicht nur in den Workflow.
 
 **Rote Läufe lesen**
 
-- Nur Python 3.11 rot: Syntax oder Paket, das 3.11 nicht kann. Das Log im Schritt „Tests ausführen“ lesen und lokal mit `python3.11` nachstellen.
-- Beide rot, besonders im Wochenlauf: Meist hat eine neue Paketversion etwas gebrochen. Lokal mit `pip install -U streamlit google-genai` bestätigen, dann den Code anpassen oder in `requirements.txt` eine Obergrenze setzen.
+- Rot, besonders im Wochenlauf: Das Log im Schritt „Tests ausführen“ lesen. Meist hat eine neue Paketversion etwas gebrochen. Lokal mit `pip install -U streamlit google-genai` bestätigen, dann den Code anpassen oder in `requirements.txt` eine Obergrenze setzen.
 - Der Lauf startet gar nicht: meist ein YAML-Fehler. Die Meldung steht im Tab „Actions“. Lokal prüft `tests/test_ci.py` die Datei mit PyYAML.
 
 ## 10. Fehlersuche
@@ -816,7 +815,6 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 | Hintergrund: „Eingabe“ viel größer als das PDF | Bei Long Decode zählt `total_input_tokens` die Eingabe jedes 64K-Schritts erneut mit | Normal, der größte Teil davon ist Cache (95 % günstiger). Kontextgröße = PDF plus Denk- plus Ausgabe-Token. |
 | `OSError: inotify watch limit reached` im Terminal | Linux-Limit für Dateibeobachtung erschöpft (oft durch IDE oder Sync-Programm). Die App läuft trotzdem, nur das automatische Neuladen bei Codeänderung fehlt | `--server.fileWatcherType none` oder in `.streamlit/config.toml` setzen, oder `fs.inotify.max_user_watches` erhöhen. |
 | pip-Fehler zu `tensorboard`/`tensorflow` nach Installation | `google-auth-oauthlib` oder `numpy`/`protobuf` wurden hochgezogen, bestehende Pakete verlangen ältere Versionen | Eigene Umgebung benutzen (siehe 3), oder `pip install "google-auth-oauthlib<1.1"`. Kein `-U` in gemeinsamen Umgebungen. |
-| `FutureWarning` von `google.api_core` im pytest-Lauf (Python 3.11, altes `grpcio`) | Hinweis von Google auf künftige Support-Enden. Für App und Tests harmlos | `pytest.ini` blendet beide Meldungen aus. Dauerhaft beheben: eigene Umgebung mit Python 3.12 oder neuer und `pip install -U grpcio`. |
 | Cache-Token überall 0 | implizites Caching ist nicht garantiert. Im Batch zusätzlich undokumentiert. Die erste synchrone Anfrage hat per Definition 0 | `usage`-JSON einer Antwort ansehen. Synchron testen. PDFs, Reihenfolge und Systemanweisung unverändert lassen. |
 | Drive: „Zugriff blockiert“ | Konto nicht als Test user eingetragen | Cloud Console → Audience → Test users (6.4, Schritt 4) |
 | Drive: `credentials.json fehlt. Lege sie nach …/conf` | OAuth-Client nicht in `conf/` abgelegt | 6.4, Schritt 6 |
@@ -825,8 +823,6 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 | Synchroner Lauf steht auf „unterbrochen“ | App wurde beendet oder neu gestartet, solange er lief | Bisherige Zeilen sind gespeichert. Mit „Eingaben übernehmen“ neu starten. |
 | Antwort abgeschnitten, Warnung `MAX_TOKENS` | Denk- plus Ausgabe-Token haben das Limit erreicht | Denktiefe senken, Token-Limit erhöhen (synchron oder im Modus „Hintergrund“) oder Aufgabe auf mehrere Prompts aufteilen. |
 | „Gespräch“: Prompt 2 „Übersprungen“ | Prompt 1 lieferte Fehler oder keine Antwort | Fehler in Prompt 1 beheben und neu starten. Folgende Paare laufen weiter. |
-| Synchron nur 32.768 Ausgabe-Token wählbar, Warnung zu google-genai | SDK älter als 2.30.1 | `pip install -U google-genai` (in eigener Umgebung). |
-| Automatische Prüfung läuft auch im Tab „Neue Anfrage“ | Streamlit älter als 1.55, kennt den aktiven Tab nicht | Streamlit aktualisieren. |
 | „Abruf fehlgeschlagen … 404“ bei altem Batch | Batch existiert bei Google nicht mehr (nach Ablauf) und wurde lokal nie gesichert | Nichts zu retten. Eintrag löschen. Neue Batches sichern ihr Ergebnis lokal. |
 | OpenAI-Eintrag: „Der OpenAI API-Key fehlt (Seitenleiste)“ | Das Keyfeld dieses Anbieters ist leer, während ein Eintrag von ihm geöffnet ist | Key eintragen. Gesicherte Ergebnisse sind auch ohne Key sichtbar. |
 | „Das Paket openai fehlt“ beim Wechsel auf OpenAI | Nach dem Update wurde `pip install -r requirements.txt` nicht ausgeführt | Nachholen. Gemini läuft auch ohne das Paket. |
@@ -885,13 +881,13 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
-- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 287 Tests (Stand der Änderung für Issue #19) liefen grün in frisch installierten Umgebungen: mit Python 3.12.3 und den neuesten Versionen (Streamlit 1.67.0, google-genai 3.3.0, openai 3.50.0), mit Python 3.12.3 und google-genai 2.30.1 (Streamlit 1.67.0, openai 3.50.0) sowie mit Python 3.11.15 (Streamlit 1.67.0, google-genai 3.3.0, openai 3.51.0). Für die 239 Tests davor gilt zusätzlich: Sie liefen auch mit der niedrigsten unterstützten Kombination (Streamlit 1.56.0, google-genai 2.30.1, openai 1.100.0), und mit Streamlit 1.55.0 laufen alle bis auf die sechs Upload-Tests (drei in `tests/test_ui.py`, drei in `tests/test_openai.py`), die `AppTest` dort noch nicht unterstützt. Beides wurde für die neuen Tests nicht wiederholt. Die GitHub-Actions-Matrix deckt 3.11 und 3.12 ab.
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 281 Tests (Stand der Änderung für Issue #20) liefen grün in frisch installierten Umgebungen mit Python 3.12.3: mit den neuesten Versionen (Streamlit 1.67.0, google-genai 3.3.0, openai 3.51.0) und mit der niedrigsten unterstützten Kombination (Streamlit 1.67.0, google-genai 3.3.0, openai 1.100.0). Streamlit und google-genai liegen mit ihrer Mindestversion derzeit auf dem neuesten Stand, beide Läufe unterscheiden sich deshalb nur in der openai-Version. Gegenüber den 287 Tests davor entfallen sechs Testfälle, die nur die entfernte Versionsprüfung für google-genai vor 2.30.1 abdeckten. Mit Python 3.11 und mit älteren Versionen von Streamlit und google-genai wird nicht mehr getestet. Die GitHub-Actions-Matrix deckt 3.12 ab.
 - Die Aufteilung in Module (Abschnitt 8) wurde zusätzlich ohne die Testsuite geprüft: Ein Vergleich der Syntaxbäume mit dem Stand davor zeigte, dass der Code unverändert verschoben wurde (nur `_base_dir()` ist angepasst, weil nun der Ort des Pakets zählt) und der Oberflächenteil identisch ist. Außerdem lief die App unter einem echten `streamlit run` (Streamlit 1.55.0, 1.56.0 und 1.67.0) gegen eine echte WebSocket-Sitzung ohne Browser: Beide Tabs wurden ohne Ausnahme gezeichnet, und nach einer Änderung an `gbui/config.py` zeigte der nächste Lauf den neuen Wert (die Module wurden neu importiert). Dieser Serverlauf gehört nicht zur Testsuite.
 - „Gespräch fortsetzen“ und die Prompt-Anzeige wurden zusätzlich einmal in einem echten Headless-Chromium gegen die laufende App mit Ersatzdiensten durchgespielt (Klick im Fragment, Tab-Wechsel, Hinweis, Startsperre, zweites Fortsetzen ohne Verschachtelung). Dieser Browsertest gehört nicht zur Testsuite.
 - Der Anbieterwechsel (Gemini, OpenAI, zurück zu Gemini, mit leerem und mit gesetztem OpenAI-Key, auch bei geöffnetem Jobs-Tab) wurde ebenfalls in einem echten Headless-Chromium gegen die laufende App durchgespielt. Modell, Denktiefe, Token-Limit, Prompts und Systemanweisung blieben erhalten, beide Anbieter behielten ihre eigenen Werte. Ohne die Zuweisung vor dem Zeichnen (`FORM_KEYS`) standen nach dem Rückwechsel das Modellfeld leer, das Token-Limit auf 256, die Denktiefe auf „Standard“, und Prompts und Systemanweisung fehlten. Auch dieser Browsertest gehört nicht zur Testsuite.
 - Der GitHub-Workflow (Abschnitt 9.5) wurde mit `actionlint` geprüft, und seine Befehle liefen wie oben beschrieben in frischen Umgebungen. Auf GitHub selbst lief er noch nicht.
 - Mit der echten API bestätigt (19.10.2026, noch mit Argon): Batch-Modus mit **einem** PDF und mehreren Prompts, Denktiefe `high`, Ergebnisabruf und Anzeige. Dabei meldeten alle Antworten Cache 0.
-- **Umstellung auf Gemini 4 Carbon: nur anhand der Google-Dokumentation (11.11.2026) und mit den simulierten Diensten der Testsuite geprüft**, nicht gegen die echte API. Geändert wurden der Modellname (`DEFAULT_MODEL`), Beschriftungen und die Doku. Anfrageformat, `thinking_level`-Werte, SDK-Mindestversion (2.30.1 für `generate_content`) und Token-Limits blieben unverändert, weil Google den Umstieg von Argon als reinen Modellnamenwechsel beschreibt.
+- **Umstellung auf Gemini 4 Carbon: nur anhand der Google-Dokumentation (11.11.2026) und mit den simulierten Diensten der Testsuite geprüft**, nicht gegen die echte API. Geändert wurden der Modellname (`DEFAULT_MODEL`), Beschriftungen und die Doku. Anfrageformat, `thinking_level`-Werte, SDK-Mindestversion (damals 2.30.1 für `generate_content`) und Token-Limits blieben unverändert, weil Google den Umstieg von Argon als reinen Modellnamenwechsel beschreibt.
 - **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, „Gespräch fortsetzen“ (wie das Modell auf einen Prompt mit eingefügtem Verlauf antwortet), Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - **OpenAI-Anbindung: nur mit simulierten Diensten getestet**, nicht gegen die echte OpenAI-API (in der Entwicklungsumgebung gab es weder Key noch Zugriff). `FakeOpenAI` liefert echte SDK-Objekte (`Batch`, `FileObject`), und ein Test stellt sicher, dass die Beispielantworten gültige `Response`-Objekte des SDK sind (openai 3.46.0). Feldnamen, Endpunkt, Parameter und die erlaubten Denktiefen stammen aus der OpenAI-Dokumentation und dem SDK. Ungeprüft, bitte beim ersten echten Einsatz beobachten: ob ein Batch am Endpunkt `/v1/responses` PDFs per `file_id` (`input_file`) annimmt (die gelesenen Dokumentationsstellen schließen es nicht aus, bestätigen es für Batches aber auch nicht), welche Denktiefen das gewählte Modell kennt, ob Cache-Treffer im Batch vorkommen, die Fehlercodes der Fehlerdatei (die Beispiele in den Tests sind nicht aus echten Läufen) und die Meldung bei überschrittenem Warteschlangenlimit.
 - **Hintergrund-Modus (Issue #19): nur anhand der Google-Dokumentation (Long Decode, Background Execution, Interactions API, Developer Guide zu Carbon, Stand 13.11.2026) und mit den simulierten Diensten der Testsuite geprüft**, nicht gegen die echte API (in der Entwicklungsumgebung gab es keinen API-Key). `FakeGemini` liefert echte SDK-Objekte (`google.genai.interactions.Interaction`), und ein Test stellt sicher, dass die gesendete Anfrage dem Schema des SDK entspricht (`CreateModelInteraction`). Ungeprüft, bitte beim ersten echten Einsatz beobachten: ob `gemini-4-carbon` die Interactions API mit `background=true` wie dokumentiert annimmt (der Developer Guide zu Carbon beschreibt `background=True`, die Doku zu Background Execution nennt in ihrer Modellliste, Stand 21.10.2026, nur Argon und Gemini 3.8 Flash), ob die Files-API-Referenz eines PDFs als `document` mit `uri` angenommen wird (so zeigt es die Doku zur Dokumentverarbeitung), ob die API ein `max_output_tokens` nahe 1.048.576 bei großer Eingabe ablehnt oder kürzt (Doku: „minus Eingabe“), ob mehrere gleichzeitige Läufe in Ratenbegrenzungen laufen und wie die Abrechnung der Schritte aussieht. Die App behandelt jeden Status außer `in_progress` und `queued` als Ende, damit eine unerwartete Statusangabe das Abfragen nicht endlos weiterlaufen lässt.
@@ -930,7 +926,7 @@ OpenAI (Stand 10.11.2026, bitte auf Änderungen prüfen):
 - **Prefix**: der gemeinsame Anfang zweier Anfragen. Implizites Caching greift darauf.
 - **Implizites Caching**: Google erkennt gleiche Anfänge automatisch und berechnet sie günstiger. Keine Zusage.
 - **Explizites Caching**: man legt selbst einen Cache an und referenziert ihn. Garantiert die Ersparnis, für Carbon und Argon nicht verfügbar.
-- **Long Decode**: automatische Fortsetzung über mehrere Teilanfragen, wenn die Ausgabe das Limit pro Anfrage überschreitet. Synchron setzt das SDK (ab 2.30.1) fort, im Hintergrund-Modus Googles Server (Schritte zu je 64K Token). Im Batch gibt es das nicht.
+- **Long Decode**: automatische Fortsetzung über mehrere Teilanfragen, wenn die Ausgabe das Limit pro Anfrage überschreitet. Synchron setzt das SDK fort, im Hintergrund-Modus Googles Server (Schritte zu je 64K Token). Im Batch gibt es das nicht.
 - **Hintergrund-Interaktion** (Background Execution): eine Anfrage der Interactions API mit `background=true`. Sie läuft bei Google bis zu 24 Stunden und wird über ihre ID abgefragt oder abgebrochen.
 - **Runde**: ein früherer Prompt samt deiner Antwort dazu. Ein Gesprächsverlauf besteht aus Runden (Abschnitt 7).
 - **Fragment**: ein Streamlit-Abschnitt, der sich allein neu ausführen kann (hier für die automatische Statusprüfung).

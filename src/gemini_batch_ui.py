@@ -23,7 +23,6 @@ import os
 from datetime import datetime
 
 import streamlit as st
-from google import genai
 
 from gbui.background import start_background
 from gbui.config import (BATCH_MAX_OUT, BG_DEFAULT_OUT, BG_MAX_OUT, DEFAULT_MODEL, DEFAULT_OPENAI_MODEL, DONE, FORM_KEYS,
@@ -32,7 +31,7 @@ from gbui.config import (BATCH_MAX_OUT, BG_DEFAULT_OUT, BG_MAX_OUT, DEFAULT_MODE
                          TALK_NEW, THINK_LEVELS, prepare_folders)
 from gbui.drive import drive_fetch, drive_id, drive_service
 from gbui.forms import delete_entry, entry_label, reuse_inputs
-from gbui.gemini import sdk_has_long_decode, start_batch, upload_pdf
+from gbui.gemini import start_batch, upload_pdf
 from gbui.history import load_jobs, mutate_jobs, runtime
 from gbui.openai_batch import start_openai_batch, upload_pdf_openai
 from gbui.providers import batch_info, entry_mode, entry_provider, make_client
@@ -81,11 +80,8 @@ except RuntimeError as e:  # z. B. das Paket openai fehlt
     st.stop()
 rt = runtime()
 
-try:  # ab Streamlit 1.55 weiß die App, welcher Tab offen ist
-    tab_new, tab_jobs = st.tabs(TABS, key="view", on_change="rerun")
-except TypeError:
-    tab_new, tab_jobs = st.tabs(TABS)
-on_jobs_tab = getattr(tab_jobs, "open", None) is not False  # ältere Versionen: immer prüfen
+tab_new, tab_jobs = st.tabs(TABS, key="view", on_change="rerun")  # .open sagt, welcher Tab offen ist
+on_jobs_tab = tab_jobs.open
 
 with tab_new:
     note = st.session_state.pop("reused_note", None)
@@ -142,10 +138,6 @@ with tab_new:
             help="1: Jeder Prompt läuft für sich. 2: Je zwei Prompts bilden ein Gespräch (der zweite sieht den ersten "
                  "und dessen Antwort), die nächsten zwei ein neues Gespräch usw. Die PDFs gehen in jedem Gespräch mit "
                  "dem ersten Prompt raus."))
-    sdk_ok = sdk_has_long_decode()
-    if sync and not sdk_ok:
-        st.warning(f"Dein google-genai ({genai.__version__}) ist älter als 2.30.1, daher ist die Ausgabe auf "
-                   f"{BATCH_MAX_OUT} Token begrenzt. Aktualisieren: pip install -U google-genai")
     c1, c2, c3 = st.columns(3)
     if provider == PROVIDER_OPENAI:
         st.session_state.setdefault("effort", "Standard")
@@ -164,9 +156,9 @@ with tab_new:
                                   help="max_output_tokens. Denk-Token zählen zum Limit. Das Maximum hängt vom "
                                        "Modell ab (bei den aktuellen Modellen bis 128.000).")
     elif sync:
-        cap = SYNC_MAX_OUT if sdk_ok else BATCH_MAX_OUT
-        st.session_state.setdefault("max_sync", min(65536, cap))
-        max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=cap, step=1024, key="max_sync",
+        st.session_state.setdefault("max_sync", min(65536, SYNC_MAX_OUT))
+        max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=SYNC_MAX_OUT, step=1024,
+                                  key="max_sync",
                                   help="Über 32768 setzt das SDK automatisch Long Decode ein "
                                        "(mehrere Teilanfragen, eine zusammengesetzte Antwort).")
     elif bg:

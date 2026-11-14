@@ -4,7 +4,6 @@ import streamlit as st
 
 from .config import (BATCH_MAX_OUT, BG_MAX_OUT, MODE_BATCH, MODE_BG, MODE_SYNC, OPENAI_EFFORTS, OPENAI_MAX_OUT,
                      PROVIDER_OPENAI, SYNC_MAX_OUT, TABS, TALK_NEW, THINK_LEVELS)
-from .gemini import sdk_has_long_decode
 from .history import mutate_jobs, runtime
 from .providers import entry_mode, entry_provider
 from .talk import conversation_text
@@ -36,7 +35,7 @@ def fill_form(j, raw, group, text):
             ss["think"] = j["think"]
         if j.get("max_out"):
             if is_sync:
-                cap, field = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT), "max_sync"
+                cap, field = SYNC_MAX_OUT, "max_sync"
             elif mode == "background":
                 cap, field = BG_MAX_OUT, "max_bg"
             else:
@@ -49,7 +48,7 @@ def fill_form(j, raw, group, text):
     if pdfs:
         note += f" Bitte die PDFs erneut anhängen: {pdfs}. Schon hochgeladene Dateien werden wiederverwendet."
     ss["reused_note"] = note
-    ss["view"] = TABS[0]  # wechselt zum Tab „Neue Anfrage“ (ab Streamlit 1.55)
+    ss["view"] = TABS[0]  # wechselt zum Tab „Neue Anfrage“
 
 
 def reuse_inputs(j):
