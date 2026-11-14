@@ -1,11 +1,12 @@
 # Gemini 4 Carbon: Batch- und Synchron-UI
 
-Lokale Streamlit-Oberfläche, um **Gemini 4 Carbon** (`gemini-4-carbon`, der Vorgänger `gemini-4-argon` lässt sich im Feld „Modell“ weiter eintragen) oder ein **OpenAI-Modell** (z. B. `gpt-6-astra`) mit **einem oder mehreren PDFs** und **vielen Prompts** zu benutzen. Es gibt zwei Betriebsarten:
+Lokale Streamlit-Oberfläche, um **Gemini 4 Carbon** (`gemini-4-carbon`, der Vorgänger `gemini-4-argon` lässt sich im Feld „Modell“ weiter eintragen) oder ein **OpenAI-Modell** (z. B. `gpt-6-astra`) mit **einem oder mehreren PDFs** und **vielen Prompts** zu benutzen. Es gibt drei Betriebsarten:
 
 - **Batch** (Gemini und OpenAI): asynchron, 50 % des Standardpreises, Ergebnis nach Minuten bis Stunden (bei OpenAI innerhalb von 24 Stunden).
 - **Synchron** (nur Gemini): Prompts laufen nacheinander im Hintergrund, mit Aussicht auf Cache-Treffer für das PDF. Optional bilden je N Prompts ein Gespräch (gemeinsamer Kontext).
+- **Hintergrund** (nur Gemini): Jeder Prompt läuft als Hintergrund-Interaktion bei Google (Interactions API, `background=true`). Nur so geht **Long Decode** über 65.536 Ausgabe-Token hinaus (bis 1.048.576 minus Eingabe), etwa wenn Carbon bei hoher Denktiefe das Limit von 32.768 im Batch aufbraucht. Standardpreis statt Batch-Rabatt, die App muss nicht durchgehend laufen.
 
-Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34). Alle Aussagen zur Google-API gelten für diesen Stand, die zu Gemini 4 Carbon beruhen auf der Google-Dokumentation vom 11.11.2026. Die Aussagen zur OpenAI-Anbindung beruhen auf der OpenAI-Dokumentation vom 10.11.2026 (openai 3.46). Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
+Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34). Alle Aussagen zur Google-API gelten für diesen Stand, die zu Gemini 4 Carbon beruhen auf der Google-Dokumentation vom 11.11.2026, die zum Hintergrund-Modus (Long Decode, Background Execution) auf der vom 13.11.2026. Die Aussagen zur OpenAI-Anbindung beruhen auf der OpenAI-Dokumentation vom 10.11.2026 (openai 3.46). Vor Änderungen an API-nahem Code die Links in Abschnitt 13 prüfen, Preise und Limits ändern sich.
 
 ## Inhalt
 
@@ -34,7 +35,7 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34)
 - **Günstig**: Batch-Rabatt nutzen, und wo möglich das PDF aus dem (impliziten) Cache lesen lassen.
 - **Bequem**: kein Skript pro Lauf. Ein Prompts-Feld, PDF-Upload (auch mehrere) oder PDFs aus Google Drive.
 - **Nachvollziehbar**: pro Antwort Modell, Abschlussgrund, Eingabe-, Cache-, Denk- und Ausgabe-Token, Dauer und rohe Nutzungsdaten.
-- **Robust**: Batches laufen bis zu 24 Stunden, synchrone Läufe im Hintergrund. Beides überlebt Tab-Wechsel und Seiten-Neuladen. Ergebnisse werden lokal gesichert.
+- **Robust**: Batches und Hintergrund-Läufe laufen bei Google (bis zu 24 Stunden), synchrone Läufe als Thread in der App. Alles überlebt Tab-Wechsel und Seiten-Neuladen. Ergebnisse werden lokal gesichert.
 
 **Nicht-Ziele**: Mehrbenutzerbetrieb, Hosting im Netz, Anmeldung, Kostenabrechnung, explizites Caching (Carbon und Argon unterstützen es nicht, siehe Abschnitt 5).
 
@@ -42,12 +43,13 @@ Dokumentationsstand: 01.11.2026 (Python 3.12, Streamlit 1.66, google-genai 2.34)
 
 ## 2. Funktionen im Überblick
 
-- Zwei Anbieter: **Gemini** (Batch und Synchron) und **OpenAI** (nur Batch, Endpunkt `/v1/responses`). Der Anbieter für neue Anfragen steht in der Seitenleiste, jeder Verlaufseintrag merkt sich seinen eigenen.
-- Zwei Modi: **Batch** und **Synchron** (synchron nur mit Gemini).
+- Zwei Anbieter: **Gemini** (Batch, Synchron und Hintergrund) und **OpenAI** (nur Batch, Endpunkt `/v1/responses`). Der Anbieter für neue Anfragen steht in der Seitenleiste, jeder Verlaufseintrag merkt sich seinen eigenen.
+- Drei Modi: **Batch**, **Synchron** und **Hintergrund** (synchron und im Hintergrund nur mit Gemini).
 - **Mehrere PDFs** pro Anfrage: Datei-Upload (mehrfach), Auswahl aus Google Drive (Liste der 50 zuletzt geänderten PDFs, mehrfach wählbar) und/oder eingefügte Drive-Links oder Datei-IDs (eine pro Zeile). Google Docs/Slides aus Drive werden als PDF exportiert. Gleiche Dateien werden nur einmal gesendet.
 - **Mehrere Prompts**, getrennt durch eine Zeile mit `---`. Optional **Systemanweisung**.
 - **Denktiefe** (Gemini: `low`, `medium`, `high`. OpenAI: `none` bis `max`. Jeweils „Standard“ = nichts senden) und **max. Ausgabe-Token**.
 - **Gespräche (nur synchron)**: „Prompts pro Gespräch“ = N. Je N aufeinanderfolgende Prompts teilen einen Kontext, das nächste Gespräch beginnt neu.
+- **Long Decode im Hintergrund (nur Gemini)**: Im Modus „Hintergrund“ startet jeder Prompt als Interaktion mit `background=true` (Interactions API). Googles Server setzen die Antwort in Schritten zu je 64K Token fort, bis zu 1.048.576 Token minus Eingabe. Das löst `MAX_TOKENS` bei hoher Denktiefe, wo ein Batch bei 32.768 Token endet. Die App fragt nur den Stand ab, wie bei einem Batch.
 - **Jobs und Ergebnisse**: Verlauf aller Läufe, automatische Statusprüfung alle 10 Sekunden solange der Tab offen ist, Ergebnisse mit Token- und Cache-Angaben, Markdown-Download, Rohdaten-JSON.
 - **Lokale Sicherung** der Ergebnisse (`data/batch_jobs.json`), auch nach Ablauf der Aufbewahrung bei Google.
 - **Eingaben übernehmen**: Prompts und Einstellungen eines früheren Eintrags zurück ins Formular holen. **Eintrag löschen** (nur lokal).
@@ -110,21 +112,21 @@ Anderer Port: `streamlit run src/gemini_batch_ui.py --server.port 8502`. Beenden
 | Element | Bedeutung |
 |---|---|
 | Anbieter für neue Anfragen | `Gemini` (Voreinstellung) oder `OpenAI`. Das Formular „Neue Anfrage“ passt sich an: Mit OpenAI entfallen der Modus (es gibt nur Batch) und „Prompts pro Gespräch“, und die Denktiefe kennt die Stufen von OpenAI. Einträge im Tab „Jobs und Ergebnisse“ werden unabhängig von dieser Wahl mit dem Anbieter und dem Key abgefragt, zu denen sie gehören. Beim Hin- und Herwechseln merkt sich die App die Werte beider Anbieter (Modell, Denktiefe, Token-Limit), Prompts und Systemanweisung gelten für beide. |
-| Gemini API-Key, OpenAI API-Key | Vorbelegt aus `GEMINI_API_KEY` bzw. `OPENAI_API_KEY`, beide dürfen eingetragen bleiben. Fehlt der Key des gewählten Anbieters, bleibt die App stehen und sagt es. Fehlt der Key des Anbieters eines Verlaufseintrags, sind dort „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“ gesperrt, gesicherte Ergebnisse bleiben sichtbar. |
+| Gemini API-Key, OpenAI API-Key | Vorbelegt aus `GEMINI_API_KEY` bzw. `OPENAI_API_KEY`, beide dürfen eingetragen bleiben. Fehlt der Key des gewählten Anbieters, bleibt die App stehen und sagt es. Fehlt der Key des Anbieters eines Verlaufseintrags, sind dort „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“ (bei Hintergrund-Einträgen „Läufe abbrechen“) gesperrt, gesicherte Ergebnisse bleiben sichtbar. |
 | Modell | Freitext, je Anbieter ein eigenes Feld (Voreinstellung `gemini-4-carbon` bzw. `gpt-6-astra`). Bei OpenAI muss das Modell die Batch API und PDF-Eingaben unterstützen. |
 
 ### Tab „Neue Anfrage“
 
 | Element | Bedeutung |
 |---|---|
-| Modus | Batch (asynchron, günstiger) oder Synchron (nacheinander im Hintergrund). Mit OpenAI gibt es nur Batch, der Schalter entfällt. |
+| Modus | Batch (asynchron, günstiger), Synchron (nacheinander, als Thread in der App) oder Hintergrund (Long Decode: jeder Prompt läuft als Interaktion bei Google, Standardpreis). Mit OpenAI gibt es nur Batch, der Schalter entfällt. |
 | PDF-Dateien | Mehrere Dateien möglich. Ein zweites PDF ersetzt das erste nicht. |
 | PDFs aus Google Drive | Button „Meine PDFs aus Drive laden“ füllt die Mehrfachauswahl. Zusätzlich Links oder Datei-IDs einfügen. Reihenfolge: hochgeladene Dateien, dann Drive-Auswahl, dann eingefügte Links. Die Reihenfolge steht als Hinweis unter dem Bereich. |
 | Systemanweisung | Optional, gilt für jede Anfrage. |
 | Prompts | Ein Textfeld, mehrere Prompts durch eine Zeile nur mit `---` trennen. Beginnt ein Prompt mit einem Gesprächsverlauf (aus „Gespräch fortsetzen“), steht der neue Prompt unter `[Mein neuer Prompt]`. Solange dort nichts steht, ist der Start gesperrt. |
 | Prompts pro Gespräch | Nur synchron. 1 = jeder Prompt für sich. 2 = je zwei Prompts bilden ein Gespräch (der zweite sieht den ersten und dessen Antwort), die nächsten zwei ein neues usw. Das PDF geht in jedem Gespräch mit dem ersten Prompt raus. |
 | Denktiefe | Gemini: „Standard“ (kein Parameter, Carbon nutzt dann `medium`), `low`, `medium`, `high`. Voreinstellung `high`. Carbon denkt länger als Argon: `medium` ist laut Google für die meisten Aufgaben richtig, `high` verbraucht die meisten Token. OpenAI: „Standard“ (kein Parameter, es gilt die Voreinstellung des Modells), `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Voreinstellung „Standard“. Welche Stufen ein Modell kennt, hängt vom Modell ab (z. B. kennt `gpt-6-astra` kein `none`). Die API lehnt andere ab, der Fehler steht dann je Prompt im Ergebnis. |
-| Max. Ausgabe-Token | Gemini-Batch: bis 32.768 (Voreinstellung 32.768). Gemini synchron: bis 1.048.576 (Voreinstellung 65.536), über 32.768 setzt das SDK automatisch Long Decode ein. OpenAI: bis 128.000 (Voreinstellung 32.768), je nach Modell darunter. Denk-Token zählen zum Limit. |
+| Max. Ausgabe-Token | Gemini-Batch: bis 32.768 (Voreinstellung 32.768). Gemini synchron: bis 1.048.576 (Voreinstellung 65.536), über 32.768 setzt das SDK automatisch Long Decode ein. Gemini Hintergrund: bis 1.048.576 (Voreinstellung 262.144), über 65.536 setzen Googles Server Long Decode ein, die Eingabe zählt mit (höchstens 1.048.576 minus Eingabe). OpenAI: bis 128.000 (Voreinstellung 32.768), je nach Modell darunter. Denk-Token zählen zum Limit. |
 | Name | Bezeichnung des Eintrags im Verlauf. |
 | Start-Button | Lädt PDFs hoch, sendet bzw. startet. Während dieser Vorbereitung nicht den Tab wechseln, sonst bricht der Start ab. |
 
@@ -137,10 +139,11 @@ Ohne angehängtes PDF werden die Prompts ohne PDF gesendet (steht als Hinweis im
 - **Eintrag löschen** (Bestätigung im Popover): entfernt den lokalen Eintrag samt gesicherter Ergebnisse. Beim Anbieter bleibt alles unverändert. Deaktiviert, solange der Eintrag läuft.
 - **Gesendete Anfrage im Detail** (Schalter, standardmäßig aus): zeigt die PDFs in ihrer Reihenfolge, die Systemanweisung und jeden Prompt im Wortlaut, bei synchronen Gesprächen mit Gespräch und Runde. Das geht auch, solange ein Batch noch läuft und es noch keine Ergebnisse gibt.
 - **Batch**: Buttons „Status prüfen / Ergebnisse laden“ und „Batch abbrechen“. Solange der Tab offen und der Batch nicht fertig ist, prüft die App alle 10 Sekunden selbst. Ist der Batch fertig, werden die Ergebnisse geladen und lokal gesichert. Danach braucht ein Öffnen keinen Abruf mehr. Bei OpenAI-Einträgen („Batch (OpenAI)“) zeigt die Statuszeile den Status der Batch API (`validating`, `in_progress`, `finalizing`, `completed`, `failed`, `expired`, `cancelling`, `cancelled`). Bei `expired` und `cancelled` lädt die App die bis dahin fertigen Antworten, die übrigen stehen mit Fehlertext in der Liste. Scheitert der ganze Batch (`failed`, z. B. wegen des Token-Limits der Warteschlange), steht der Grund als Fehlermeldung über den Ergebnissen.
+- **Hintergrund** („Hintergrund (Long Decode)“ in der Kopfzeile): wie beim Batch die Buttons „Status prüfen / Ergebnisse laden“ und „Läufe abbrechen“ und die automatische Prüfung alle 10 Sekunden, solange der Tab offen und nicht alles beendet ist. Je Prompt läuft eine eigene Interaktion bei Google. Die Statuszeile zeigt `in_progress`, solange mindestens eine läuft (dazu „n von m Prompts fertig“), danach `completed` (einzelne Fehler stehen in den Ergebnissen), `cancelled` (alle abgebrochen) oder `failed` (alle fehlgeschlagen). Fertige Antworten erscheinen sofort, auch wenn andere noch laufen. Erst wenn alle beendet sind, sichert die App das Endergebnis lokal. „Läufe abbrechen“ bricht alle Interaktionen ab, bezahlt wird, was bis dahin angefallen ist.
 - **Synchron**: Zustand `läuft`, `fertig`, `abgebrochen`, `fehlgeschlagen` oder `unterbrochen`, Fortschritt „n von m Prompts“, Button „Lauf abbrechen“ (greift nach der gerade laufenden Anfrage).
 - **Ergebnisse**: Summenzeile (Eingabe-Token gesamt und davon aus dem Cache), Download „Ergebnisse als Markdown“, pro Prompt ein Ausklappfeld mit Antwort, Warnungen, Detailzeile (Modell, Abschlussgrund, Token, Dauer) und rohen `usage`-Daten als einklappbarem JSON. Die Überschrift zeigt nur die ersten 90 Zeichen des Prompts (bei einer Fortsetzung ein ↪ und den neuen Prompt). Der Schalter „Prompt im Wortlaut“ zeigt den ganzen Prompt. Unter der Antwort stehen „Gespräch fortsetzen“ und der Schalter „Verlaufstext zeigen“.
 
-**Warnungen in den Ergebnissen.** `MAX_TOKENS` bedeutet: Denk- und Ausgabe-Token haben das Limit erreicht, die Antwort ist abgeschnitten. Jeder andere Abschlussgrund außer `STOP` (z. B. `SAFETY`) wird ebenfalls gemeldet.
+**Warnungen in den Ergebnissen.** `MAX_TOKENS` bedeutet: Denk- und Ausgabe-Token haben das Limit erreicht, die Antwort ist abgeschnitten. Jeder andere Abschlussgrund außer `STOP` (z. B. `SAFETY`) wird ebenfalls gemeldet. Bei einem Gemini-Batch weist die App bei `MAX_TOKENS` zusätzlich auf den Modus „Hintergrund“ hin. Im Hintergrund-Modus gilt der Status der Interaktion als Abschlussgrund: `completed` ist `STOP`, `incomplete` (alle `max_output_tokens` verbraucht, der Text ist leer, wenn das Modell noch dachte) ist `MAX_TOKENS`, jeder andere Status erscheint in Großbuchstaben (z. B. `FAILED`, `CANCELLED`).
 
 **Token bei OpenAI.** OpenAI rechnet Denk-Token in `output_tokens` ein. Die App trennt sie, damit die Zeilen beider Anbieter gleich zu lesen sind: „Denken“ = `reasoning_tokens`, „Ausgabe“ = `output_tokens` minus `reasoning_tokens`, „Cache“ = `cached_tokens`. Eine unvollständige Antwort (`incomplete` wegen `max_output_tokens`) erscheint als `MAX_TOKENS`, damit dieselbe Warnung greift, jeder andere Grund (z. B. `content_filter`) steht im Wortlaut der API da.
 
@@ -166,12 +169,13 @@ Carbon (`gemini-4-carbon`, seit 10.11.2026) und sein Vorgänger Argon haben laut
 |---|---|---|
 | Modell-ID | `gemini-4-carbon` (Vorgänger: `gemini-4-argon`) | Voreinstellung im Feld „Modell“ |
 | Denktiefe | `thinking_level` ∈ {`low`, `medium`, `high`}, Standard `medium` | Auswahl „Denktiefe“, „Standard“ sendet nichts |
-| Denk-Token | zählen zum Limit `max_output_tokens` und werden wie Ausgabe-Token berechnet (Preisseite). Carbon kann mehr davon verbrauchen als Argon. Google empfiehlt ein Limit ab 32.768, zum Sparen die Denktiefe zu senken | Warnung bei `MAX_TOKENS`, Voreinstellungen 32.768 (Batch) und 65.536 (synchron) |
+| Denk-Token | zählen zum Limit `max_output_tokens` und werden wie Ausgabe-Token berechnet (Preisseite). Carbon kann mehr davon verbrauchen als Argon. Google empfiehlt ein Limit ab 32.768, zum Sparen die Denktiefe zu senken | Warnung bei `MAX_TOKENS`, Voreinstellungen 32.768 (Batch), 65.536 (synchron) und 262.144 (Hintergrund) |
 | Explizites Caching | wird für Carbon (wie für Argon) nicht unterstützt, Aufrufe mit `cached_content` entfallen | kein `cached_content` in der App |
 | Implizites Caching | automatisch ab 4.096 Token, gecachte Eingabe-Token 95 % günstiger, keine Garantie | PDFs ganz vorn in fester Reihenfolge |
 | Batch | JSONL-Datei mit Zeilen `{"key", "request"}`, 50 % des Standardpreises, Ziel 24 Stunden, Ergebnisse 6 Wochen abrufbar | Batch-Modus |
-| Batch-Ausgabelimit | 32.768 Token, kein Long Decode (API-Fehler sonst: „max_output_tokens cannot exceed 32768“). Beobachtet bei Argon, für Carbon nennt die Doku keinen anderen Wert (ungeprüft) | Feld im Batch-Modus begrenzt |
-| Ausgabe pro Anfrage | 32.768 (nicht streamend), 65.536 (streamend). Mit google-genai ≥ 2.30.1 setzt das SDK automatisch fort (Long Decode), bis 1.048.576 | Feld im Sync-Modus bis 1.048.576 |
+| Batch-Ausgabelimit | 32.768 Token, kein Long Decode (API-Fehler sonst: „max_output_tokens cannot exceed 32768“). Der Batch läuft über `generateContent` (nicht streamend: 32.768 je Anfrage), und die Interactions API, die 65.536 und Long Decode kennt, bietet laut Google noch keinen Batch. Beobachtet bei Argon, für Carbon nennt die Doku keinen anderen Wert (ungeprüft). Prüfen lässt es sich so: `BATCH_MAX_OUT` auf `65536` setzen und einen kleinen Batch starten, lehnt die API ab, erscheint der Fehler schon beim Start | Feld im Batch-Modus begrenzt |
+| Ausgabe pro Anfrage | `generateContent`: 32.768 (nicht streamend), 65.536 (streamend). Mit google-genai ≥ 2.30.1 setzt das SDK automatisch fort (Long Decode), bis 1.048.576 | Feld im Sync-Modus bis 1.048.576 |
+| Hintergrund (Long Decode) | Interactions API: 65.536 je Interaktion, wenn `background` fehlt oder `max_output_tokens` nicht gesetzt ist (höhere Werte ohne `background=true` lehnt die API mit 400 ab). Mit `background=true` (verlangt `store=true`) und `max_output_tokens` über 65.536 setzen Googles Server die Antwort in Schritten zu je 64K Token fort, bis 1.048.576 minus Eingabe, Laufzeit bis 24 Stunden. Jedes Token jedes Schritts wird berechnet, wiederholte Eingabe ist durch implizites Caching 95 % günstiger. Google bewahrt Interaktionen bei kostenpflichtigen Konten bis zu 55 Tage auf (in AI Studio auf 7, 14, 28 oder 55 Tage einstellbar), bei kostenlosen 1 Tag | Modus „Hintergrund“, Feld bis 1.048.576, Voreinstellung 262.144 (Empfehlung der Doku für schwere Aufgaben) |
 | Timeouts | mindestens 15 bis 20 Minuten pro Aufruf empfohlen (Carbon denkt länger als Argon) | `SYNC_TIMEOUT_MS` = 25 Minuten |
 | Preis | wie Argon. Standard je 1 Mio. Token: 2 $ Eingabe und 10 $ Ausgabe (inklusive Denk-Token) bis 30.11.2026, ab 01.12.2026 4 $ und 20 $. Batch: die Hälfte | keine Kostenanzeige in der App (Preisseite prüfen) |
 | Thought Signatures | Modellantwort unverändert in den Verlauf zurückgeben | Gespräche übernehmen `candidates[0].content` unverändert |
@@ -190,12 +194,15 @@ Implizites Caching vergleicht den **Anfang (Prefix)** einer Anfrage mit frühere
 - Hochgeladene PDFs werden über ihren SHA-256 in `data/pdf_files.json` gemerkt, damit dieselbe Datei-Referenz (URI) auch nach einem Neustart benutzt wird, solange die Files API sie noch hält (derzeit 48 Stunden). Ob Google intern Dateiinhalt oder Datei-Referenz vergleicht, ist nicht dokumentiert. Eine gleiche Referenz ist der sicherere Weg.
 - **Synchron** sendet strikt nacheinander. Die erste Anfrage füllt den Cache (zeigt meist „Cache 0“), die folgenden können treffen. Zeitliche Nähe hilft, eine Garantie gibt es nicht.
 - **Batch** läuft asynchron, die Verarbeitungszeitpunkte bestimmt Google. Zu implizitem Caching im Batch steht in der Doku nichts. Die Batch-Doku nennt Caching dort nur über `cached_content` (explizit, bei Carbon nicht möglich).
+- **Hintergrund** startet alle Prompts gleichzeitig. Ein Cache-Treffer für die PDFs ist deshalb weniger wahrscheinlich als synchron, wo die erste Anfrage den Cache füllt. Bei Long Decode zählt `total_input_tokens` die Eingabe jedes 64K-Schritts erneut mit (vor allem als Cache-Token) und ist deshalb viel größer als der Kontext. Für dessen Größe gilt: PDF-Token plus Denk- plus Ausgabe-Token.
 - **Gespräche** (Prompts pro Gespräch > 1): Der zweite Prompt sendet den ganzen Verlauf erneut (PDFs, erster Prompt, Antwort, zweiter Prompt). Der Anfang bis einschließlich erstem Prompt ist identisch zur vorherigen Anfrage und kann gecacht werden. Die neue Antwort und der neue Prompt werden normal berechnet. Jedes neue Gespräch beginnt wieder mit denselben PDFs, deshalb kann das PDF auch über Gesprächsgrenzen hinweg gecacht werden.
 - Sicher sparen lässt sich nur, wenn das PDF gar nicht mehrfach gesendet wird (mehrere Fragen in einem Prompt) oder mit einem Modell, das explizites Caching unterstützt. Beides ist in der App nicht eingebaut.
 
 ### Beobachtung aus der Praxis
 
 Erster echter Batch (19.10.2026, noch mit Argon): 3 Prompts, 1 PDF, je rund 80.260 Eingabe-Token, Denk-Token 2.188 bis 3.359, Ausgabe-Token 1.133 bis 1.827. **Cache-Token: überall 0.** Das deckt sich mit der Annahme, dass Batch bei Argon keine verlässlichen impliziten Treffer liefert. Für Carbon liegt noch keine eigene Beobachtung vor. Ob die API das Feld in Batch-Ergebnissen unter anderem Namen führt, lässt sich im einklappbaren `usage`-JSON jeder Antwort prüfen (die App liest `cachedContentTokenCount`, `cached_content_token_count`, `totalCachedTokens`, `total_cached_tokens`).
+
+Erster Carbon-Batch (12.11.2026, der Eintrag aus Issue #19): Denktiefe `high`, max. 32.768 Ausgabe-Token, Eingabe 32.407 Token. Ergebnis: `finishReason: MAX_TOKENS` mit 32.765 Denk- und nur 3 Ausgabe-Token, also keine Antwort: Carbon hat das gesamte Limit mit Denken verbraucht. Abhilfe: Modus „Hintergrund“ mit höherem Limit (Long Decode) oder eine niedrigere Denktiefe.
 
 ### OpenAI-Besonderheiten (laut OpenAI-Doku, Stand 10.11.2026)
 
@@ -243,10 +250,13 @@ Die **Cache-Strategie** (Reihenfolge `[Systemanweisung] [PDF 1] [PDF 2] … [Pro
 | `DONE` | 4 `JOB_STATE_*`-Endzustände (Gemini) und `completed`, `failed`, `cancelled`, `expired` (OpenAI) | Wann ein Batch als abgeschlossen gilt |
 | `BATCH_MAX_OUT` | `32768` | Batch-Limit für Ausgabe-Token |
 | `SYNC_MAX_OUT` | `1_048_576` | Obergrenze synchron (Long Decode) |
+| `BG_MAX_OUT` | `1_048_576` | Obergrenze im Hintergrund-Modus (Long Decode auf Googles Servern, minus Eingabe) |
+| `BG_DEFAULT_OUT` | `262_144` | Voreinstellung im Hintergrund-Modus (Empfehlung der Google-Doku für schwere Aufgaben) |
+| `BG_RUNNING` | `in_progress`, `queued` | Status einer Hintergrund-Interaktion, solange sie läuft (jeder andere gilt als Ende) |
 | `SYNC_TIMEOUT_MS` | 25 Minuten | HTTP-Timeout pro synchronem Aufruf |
 | `MAX_POLL_ERRORS` | `3` | So viele Abruffehler in Folge stoppen die automatische Prüfung |
 | `TABS` | „Neue Anfrage“, „Jobs und Ergebnisse“ | Tab-Namen (auch Schlüsselwerte für `view`) |
-| `MODE_BATCH`, `MODE_SYNC` | Radio-Texte | Werte des Modus-Schalters |
+| `MODE_BATCH`, `MODE_SYNC`, `MODE_BG` | Radio-Texte | Werte des Modus-Schalters |
 | `THINK_LEVELS` | Standard, low, medium, high | Auswahl Denktiefe bei Gemini |
 | `OPENAI_EFFORTS` | Standard, none, minimal, low, medium, high, xhigh, max | Auswahl Denktiefe bei OpenAI (die Stufen von `reasoning.effort`) |
 | `OPENAI_ENDPOINT` | `/v1/responses` | Endpunkt der OpenAI Batch API (JSONL-Zeile und `batches.create`) |
@@ -260,7 +270,7 @@ Die **Cache-Strategie** (Reihenfolge `[Systemanweisung] [PDF 1] [PDF 2] … [Pro
 | `TALK_MINE`, `TALK_YOURS` | `[Runde {n}: Mein Prompt]`, `[Runde {n}: Deine Antwort dazu]` | Marken je Runde |
 | `TALK_MARK` | Muster | erkennt genau diese Marken wieder (`parse_conversation()`) |
 
-Weitere Voreinstellungen stehen direkt im Hauptskript (`src/gemini_batch_ui.py`): Denktiefe `high` (`st.session_state.setdefault("think", "high")`), Ausgabe-Token synchron 65.536 und im Batch 32.768, Prompts pro Gespräch 1. Bei OpenAI: Denktiefe „Standard“ (`st.session_state.setdefault("effort", "Standard")`) und Ausgabe-Token 32.768. Wiederholungen bei vorübergehenden Fehlern in `ask()`: 3 Versuche, Pause 10 s und 20 s, nur für HTTP 429, 500, 503, 504.
+Weitere Voreinstellungen stehen direkt im Hauptskript (`src/gemini_batch_ui.py`): Denktiefe `high` (`st.session_state.setdefault("think", "high")`), Ausgabe-Token synchron 65.536, im Batch 32.768 und im Hintergrund `BG_DEFAULT_OUT`, Prompts pro Gespräch 1. Bei OpenAI: Denktiefe „Standard“ (`st.session_state.setdefault("effort", "Standard")`) und Ausgabe-Token 32.768. Wiederholungen bei vorübergehenden Fehlern in `ask()` (synchron): 3 Versuche, Pause 10 s und 20 s, nur für HTTP 429, 500, 503, 504. `create_interaction()` (Hintergrund) wiederholt genauso, aber nur bei 429: Nach einem 5xx könnte die Interaktion schon angelegt sein, und ein zweiter Aufruf würde sie doppelt berechnen. Das SDK wiederholt 5xx selbst, kurz und höchstens zweimal.
 
 ### 6.3 Streamlit-Konfiguration (optional, `.streamlit/config.toml`)
 
@@ -408,7 +418,32 @@ Synchroner Eintrag (Zeilen wachsen live):
 
 `state` synchron: `RUNNING`, `DONE`, `FAILED` (mit Feld `error`), `CANCELLED`. `INTERRUPTED` wird **nicht gespeichert**, sondern in `sync_view()` abgeleitet, wenn `RUNNING` in der Datei steht, aber kein Thread mehr lebt.
 
-Eine Zeile in `rows` (alle Modi und Anbieter, erzeugt von `parse_line()` bzw. bei OpenAI von `parse_openai_line()`, dieselbe Form):
+Hintergrund-Eintrag (die Felder `state`, `rows`, `error`, `api_model` kommen erst, wenn alle Interaktionen beendet sind, wie beim Batch):
+
+```json
+{
+  "name": "bg-20261112-230500-3f9a",
+  "mode": "background",
+  "label": "background-20261112-2305",
+  "model": "gemini-4-carbon",
+  "pdf": "Buch.pdf",
+  "pdfs": ["Buch.pdf"],
+  "prompts": {"prompt-1": "…", "prompt-2": "…"},
+  "system": "",
+  "think": "high",
+  "max_out": 262144,
+  "interactions": {"prompt-1": "v1_…", "prompt-2": "v1_…"},
+  "created": "2026-11-12T23:05:00",
+  "state": "completed",
+  "rows": [],
+  "error": null,
+  "api_model": "gemini-4-carbon"
+}
+```
+
+`name` ist ein lokaler Name (`bg-<Datum>-<Uhrzeit>-<Zufall>`), `interactions` ordnet jedem Prompt-Schlüssel die ID seiner Interaktion bei Google zu. `state` ist `completed`, `cancelled` oder `failed` (klein geschrieben, wie bei OpenAI), solange eine Interaktion läuft, steht es nicht in der Datei. `api_model` ist das von der API gemeldete Modell. Google bewahrt die Interaktionen bei kostenpflichtigen Konten bis zu 55 Tage auf (in AI Studio auf 7, 14, 28 oder 55 Tage einstellbar), bei kostenlosen 1 Tag. Danach sind sie dort weg, das lokal gesicherte Endergebnis bleibt.
+
+Eine Zeile in `rows` (alle Modi und Anbieter, erzeugt von `parse_line()`, bei OpenAI von `parse_openai_line()` und im Hintergrund von `parse_interaction()`, dieselbe Form):
 
 ```json
 {
@@ -424,7 +459,7 @@ Eine Zeile in `rows` (alle Modi und Anbieter, erzeugt von `parse_line()` bzw. be
 }
 ```
 
-`secs` gibt es nur synchron. `error` ist ein Text (bei Gemini auch das Fehlerobjekt der API, bei OpenAI immer als Text `code: Meldung`). Bei OpenAI ist `usage` das `usage`-Objekt der Antwort, `out` die Ausgabe ohne Denk-Token, `finish` ist `STOP` (Status `completed`), `MAX_TOKENS` (`incomplete` wegen `max_output_tokens`) oder sonst der Grund bzw. Status. Übersprungene Prompts eines abgebrochenen Gesprächs haben `error` = „Übersprungen: …“.
+`secs` gibt es nur synchron. `error` ist ein Text (bei Gemini auch das Fehlerobjekt der API, bei OpenAI immer als Text `code: Meldung`). Bei OpenAI ist `usage` das `usage`-Objekt der Antwort, `out` die Ausgabe ohne Denk-Token, `finish` ist `STOP` (Status `completed`), `MAX_TOKENS` (`incomplete` wegen `max_output_tokens`) oder sonst der Grund bzw. Status. Im Hintergrund ist `usage` das `usage`-Objekt der Interaktion (`total_input_tokens` usw., über alle Schritte), der Text die Summe aller Schritte vom Typ `model_output`, `finish` ist `STOP` (Status `completed`), `MAX_TOKENS` (`incomplete`) oder der Status in Großbuchstaben. Übersprungene Prompts eines abgebrochenen Gesprächs haben `error` = „Übersprungen: …“.
 
 Ältere Einträge können Felder nicht haben (`system`, `pdfs`, `think`, `group`, `state`, `rows` …). Neue Felder deshalb **immer optional** lesen (`.get()`).
 
@@ -514,11 +549,12 @@ Ein Modul von `gbui` importiert nur Module, die in dieser Tabelle über ihm steh
 |---|---|
 | `src/gbui/config.py` | Konstanten (siehe 6.2), `_base_dir()` (Wurzel), `prepare_folders()` (legt `conf/` und `data/` an, übernimmt Altbestand) |
 | `src/gbui/history.py` | `runtime()` (prozessweit: `lock`, `threads`, `cancel`), `load_jobs()`, `mutate_jobs(lock, change)` |
-| `src/gbui/rows.py` | die gemeinsame Zeilenform: `pick()`, `parse_line()`, `parse_results()` (mit wählbarem Zeilenleser) |
+| `src/gbui/rows.py` | die gemeinsame Zeilenform: `pick()`, `parse_line()`, `parse_results()` (mit wählbarem Zeilenleser), für den Hintergrund-Modus `as_dict()` und `parse_interaction()` |
 | `src/gbui/drive.py` | `drive_service()` (OAuth, Neuanmeldung bei `RefreshError`), `drive_id()` (ID aus Link), `drive_fetch()` (PDF laden/exportieren) |
 | `src/gbui/gemini.py` | `sdk_has_long_decode()`, `upload_pdf()` (Files API + `data/pdf_files.json`), `start_batch()` (JSONL bauen, hochladen, `batches.create`) |
+| `src/gbui/background.py` | Hintergrund-Modus (Interactions API, Long Decode): `interaction_request()` (Anfrage), `create_interaction()` (mit Wiederholung), `start_background()` (alle Prompts starten, Eintrag speichern), `fetch_background()` (Stand, Zeilen, Endzustand), `cancel_background()` |
 | `src/gbui/openai_batch.py` | `openai_client()` (lädt das Paket erst hier), `upload_pdf_openai()` (Files API + `data/openai_files.json`), `openai_request()` (Anfragerumpf), `start_openai_batch()` (JSONL bauen, hochladen, `batches.create`), `openai_error_text()`, `parse_openai_line()`, `fetch_openai_batch()` (Status, Ausgabe- und Fehlerdatei) |
-| `src/gbui/providers.py` | `make_client()`, `entry_provider()`, `refresh()` (Status + Ergebnisse laden, Endergebnis sichern, bei OpenAI-Einträgen über `fetch_openai_batch()`), `batch_info()`, `cancel_batch()` (je Anbieter) |
+| `src/gbui/providers.py` | `make_client()`, `entry_provider()`, `entry_mode()` (`sync`, `background` oder `batch`), `refresh()` (Status + Ergebnisse laden, Endergebnis sichern, bei OpenAI-Einträgen über `fetch_openai_batch()`, bei Hintergrund-Einträgen über `fetch_background()`), `batch_info()`, `cancel_batch()` (je Anbieter und Modus) |
 | `src/gbui/sync.py` | synchroner Modus: `ask()` (Retry), `run_sync()` (Thread-Funktion), `start_sync()`, `sync_view()` |
 | `src/gbui/talk.py` | Gesprächsverlauf als Text: `entry_group()` (Prompts pro Gespräch eines Eintrags), `talk_safe()`, `conversation_text()`, `parse_conversation()`, `history_turns()`, `short_prompt()` |
 | `src/gbui/forms.py` | Verlauf und Formular: `entry_label()`, `fill_form()` (Hilfe), `reuse_inputs()` und `continue_conversation()` (Callbacks), `delete_entry()` (Callback) |
@@ -567,6 +603,21 @@ Thread   ──► je Prompt: Content bauen (PDFs nur im ersten Prompt eines Ges
 Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING alle 10 s neu
 ```
 
+### Datenfluss Hintergrund
+
+```text
+Formular ──► Dateien sammeln, upload_pdf() je PDF (wie beim Batch)
+         ──► start_background(): je Prompt client.interactions.create(model, input=[PDFs als document + uri, Prompt],
+             generation_config={max_output_tokens, thinking_level}, background=True, store=True)
+             → Interaktions-ID. Scheitert einer, werden die schon gestarteten abgebrochen.
+         ──► Verlaufseintrag (mode background, interactions {Schlüssel: ID}, ohne state) in data/batch_jobs.json
+Jobs-Tab ──► Fragment alle 10 s: refresh() → fetch_background() → client.interactions.get(id) je Prompt
+             (Zeilen aus der letzten Abfrage bleiben stehen, beendete Interaktionen werden nicht erneut geladen)
+         ──► beendet (alles außer in_progress/queued): parse_interaction() → Zeile. Text = alle model_output-Schritte
+         ──► alle beendet: Endzustand (state, rows, error, api_model) in den Eintrag schreiben, danach kein Abruf mehr
+Abbruch  ──► cancel_batch() → cancel_background() → client.interactions.cancel(id) je Prompt
+```
+
 ### Streamlit-Besonderheiten, die man kennen muss
 
 - **Tab-Erkennung**: `st.tabs(TABS, key="view", on_change="rerun")` (ab 1.55). `tab_jobs.open` sagt, ob der Jobs-Tab offen ist. Der Inhalt versteckter Tabs läuft trotzdem, gesteuert wird über `.open`. Ein Tab-Wechsel löst einen **vollständigen Rerun** aus. Das unterbricht jedes Skript, das gerade lange läuft (Uploads im Start-Handler). Lange Arbeit gehört deshalb in einen Hintergrund-Thread (siehe `start_sync`). Bei älteren Streamlit-Versionen schlägt der Aufruf mit `TypeError` fehl, der Fallback ist `st.tabs(TABS)`; `getattr(tab_jobs, "open", None) is not False` ergibt dann „immer prüfen“.
@@ -586,20 +637,20 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 | `view` | aktiver Tab (nur ab 1.55 wirksam). `reuse_inputs` und `continue_conversation` setzen ihn auf „Neue Anfrage“ |
 | `provider` | Anbieter-Radio der Seitenleiste (`PROVIDERS`). `fill_form()` setzt es, wenn ein Eintrag übernommen wird |
 | `model_gemini`, `model_openai` | Modellfeld je Anbieter (`fill_form()` setzt es beim Übernehmen) |
-| `mode` | Modus-Radio (`MODE_BATCH` / `MODE_SYNC`). Mit OpenAI wird es nicht angezeigt |
+| `mode` | Modus-Radio (`MODE_BATCH` / `MODE_SYNC` / `MODE_BG`). Mit OpenAI wird es nicht angezeigt |
 | `system`, `raw` | Systemanweisung, Prompts-Textfeld |
 | `think`, `effort` | Denktiefe bei Gemini bzw. OpenAI (Voreinstellung per `setdefault`) |
-| `max_batch`, `max_sync`, `max_openai` | Ausgabe-Token je Modus bei Gemini bzw. bei OpenAI (Voreinstellung per `setdefault`) |
+| `max_batch`, `max_sync`, `max_bg`, `max_openai` | Ausgabe-Token je Modus bei Gemini bzw. bei OpenAI (Voreinstellung per `setdefault`) |
 | `group` | Prompts pro Gespräch |
-| `label_batch`, `label_sync`, `label_openai` | Namensfeld je Modus bzw. für OpenAI |
+| `label_batch`, `label_sync`, `label_background`, `label_openai` | Namensfeld je Modus bzw. für OpenAI |
 | `sel` | Auswahl im Jobs-Tab (Wert = `entry_label(eintrag)`). Der Start-Handler setzt ihn auf den neuen Eintrag |
 | `drive_pdfs` | `{Anzeigename: Drive-ID}` der geladenen Drive-Liste |
 | `reused_note` | einmaliger Hinweis nach „Eingaben übernehmen“ und „Gespräch fortsetzen“ (wird beim Anzeigen entfernt) |
-| `res:<name>` | Ergebnisstand eines Batches in der Sitzung (`state`, `rows`, `error`, `model`) |
+| `res:<name>` | Ergebnisstand eines Batches oder Hintergrund-Eintrags in der Sitzung (`state`, `rows`, `error`, `model`) |
 | `err:<name>`, `errn:<name>` | letzte Abruffehlermeldung, Zähler aufeinanderfolgender Fehler |
 | `detail:<name>` | Schalter „Gesendete Anfrage im Detail“ je Eintrag |
 | `prompt:<name>`, `hist:<name>` | Schalter „Prompt im Wortlaut“ und „Verlaufstext zeigen“ je Ergebnis (nach dem Eintragsnamen folgt `:` und der Prompt-Schlüssel, z. B. `prompt-1`) |
-| Button-Schlüssel | `chk:`, `cx:` (Batch prüfen/abbrechen), `stop:` (Lauf abbrechen), `dl:` (Download), `reuse:`, `del:`, `talk:` (Gespräch fortsetzen) jeweils plus Eintragsname (bei `talk:` danach `:` und der Prompt-Schlüssel) |
+| Button-Schlüssel | `chk:`, `cx:` (Batch bzw. Hintergrund-Läufe prüfen/abbrechen), `stop:` (Lauf abbrechen), `dl:` (Download), `reuse:`, `del:`, `talk:` (Gespräch fortsetzen) jeweils plus Eintragsname (bei `talk:` danach `:` und der Prompt-Schlüssel) |
 
 ## 9. Weiterentwickeln
 
@@ -608,7 +659,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 1. **Erst diese Datei lesen**, dann das Hauptskript `src/gemini_batch_ui.py` und das Modul in `src/gbui/`, das zum Thema passt (Landkarte in Abschnitt 8). Kleine, gezielte Änderungen statt Umbauten. Logik gehört in ein Modul von `gbui`, das Hauptskript bleibt die Oberfläche. Ein neues Thema bekommt ein neues Modul, eingetragen in der Landkarte und in der Liste in `src/gbui/__init__.py`. Ein Modul importiert nur Module, die in dieser Liste über ihm stehen. Wächst eine Datei deutlich über etwa 1.000 Zeilen, wird sie nach Thema geteilt (Importe werden gecacht, nur das Hauptskript läuft bei jedem Rerun neu).
 2. **Prefix stabil halten** (Abschnitt 5). Alles, was vor oder zwischen den PDFs steht, beeinflusst die Cache-Trefferquote.
 3. **Verlauf nur über `mutate_jobs`** schreiben, nie `data/batch_jobs.json` direkt. Lesen mit `load_jobs()`. Neue Eintragsfelder optional (`.get()`), weil alte Einträge sie nicht haben.
-4. **Zeilenform nur in `parse_line()` und `parse_openai_line()` ändern** und dort neue Felder ergänzen (beide liefern dieselbe Form). Anzeige in `show_rows()`. Alle Modi und Anbieter nutzen dieselbe Zeilenform, und gespeicherte Zeilen alter Läufe haben neue Felder nicht (`.get()`).
+4. **Zeilenform nur in `parse_line()`, `parse_openai_line()` und `parse_interaction()` ändern** und dort neue Felder ergänzen (alle drei liefern dieselbe Form). Anzeige in `show_rows()`. Alle Modi und Anbieter nutzen dieselbe Zeilenform, und gespeicherte Zeilen alter Läufe haben neue Felder nicht (`.get()`).
 5. **Lange Arbeit in einen Thread** mit Verlaufseintrag und Polling-Fragment legen (Muster: `start_sync` → `run_sync` → `sync_panel`). Alles im Hauptskript kann durch einen Tab-Wechsel unterbrochen werden.
 6. **Widgets, die per Code gesetzt werden sollen, brauchen einen `key`.** Voreinstellung über `st.session_state.setdefault(key, wert)` setzen und dem Widget kein `value=`/`index=` mitgeben (sonst Streamlit-Warnung). Widget-Zustand nur **vor** dem Erzeugen des Widgets im selben Lauf ändern (in Callbacks oder weiter oben im Skript), danach gibt es eine Ausnahme. Ein neues Formularfeld mit Schlüssel gehört außerdem in `FORM_KEYS`, sonst vergisst Streamlit seinen Wert, sobald es einen Lauf lang fehlt. Ein Test erinnert daran.
 7. **Keine verschachtelten Expander** (Streamlit verbietet es). Popover in Spalten ist erlaubt.
@@ -622,7 +673,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 **Neuen Generierungsparameter hinzufügen (z. B. Temperatur)**
 
 1. Widget mit `key` neben „Denktiefe“ ergänzen (Voreinstellung per `setdefault`, Schlüssel in `FORM_KEYS` aufnehmen).
-2. In `start_batch()` in das Dict `gen` aufnehmen, in `run_sync()` in `types.GenerateContentConfig(...)`, bei OpenAI in `openai_request()`.
+2. In `start_batch()` in das Dict `gen` aufnehmen, in `run_sync()` in `types.GenerateContentConfig(...)`, im Hintergrund-Modus in `interaction_request()` (`generation_config`), bei OpenAI in `openai_request()`.
 3. Wert im Eintrag speichern (`start_sync()` bzw. das Batch-Eintrags-Dict im Start-Handler).
 4. `reuse_inputs()` und die Beschriftung im Jobs-Tab erweitern.
 5. Testen (9.3). In der Carbon-Doku prüfen, ob der Parameter noch wirkt.
@@ -631,7 +682,7 @@ Jobs-Tab ──► sync_panel(): Eintrag aus der Datei lesen, solange RUNNING al
 
 1. Konstante `MODE_…` und Eintrag im Modus-Radio.
 2. Startfunktion nach dem Muster `start_sync()`. Eintrag mit `"mode": "<neu>"`.
-3. `job_panel()` verteilt nach `j.get("mode")`. Neues Panel ergänzen. Entscheidung `running` im `with tab_jobs:`-Block ergänzen.
+3. `job_panel()` verteilt nach `j.get("mode")` (`entry_mode()` in `providers.py` nennt die Betriebsart). Neues Panel ergänzen. Entscheidung `running` im `with tab_jobs:`-Block ergänzen. Ein Modus, der wie ein Batch abgefragt wird, braucht kein neues Panel: Muster dafür ist der Hintergrund-Modus (Zweige in `refresh()` und `cancel_batch()`, eigene Beschriftung in `job_panel()`).
 4. `reuse_inputs()` für den neuen Modus erweitern.
 
 **Weiteren Anbieter ergänzen** (Muster: OpenAI)
@@ -657,7 +708,7 @@ Die Testsuite liegt in `tests/` und braucht weder Internet noch API-Key. Alle Go
 
 ```bash
 pip install -r requirements-dev.txt        # installiert zusätzlich pytest
-pytest                                     # alle Tests (rund 240, etwa 25 Sekunden)
+pytest                                     # alle Tests (rund 280, etwa 30 Sekunden)
 pytest -m "not ui"                         # nur die schnellen Tests ohne Oberfläche (unter 2 Sekunden)
 pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnitt
 ```
@@ -668,10 +719,11 @@ pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnit
 |---|---|
 | `pytest.ini` | Einstellungen, Marker `ui` für die langsameren Oberflächentests, `pythonpath = src` (damit `import gbui` in den Tests klappt) |
 | `tests/conftest.py` | Fixtures: `home` (Wegwerf-Ordner als `GEMINI_UI_HOME`, Dummy-Keys für beide Anbieter), `fresh_package` (importiert die Module von `gbui` in jedem Test neu, weil sie ihre Ordner beim Import aus `GEMINI_UI_HOME` berechnen), `app` (alle Module von `gbui` als ein Objekt), `rt` (Ersatz für `runtime()`), `fake_time` (keine echten Pausen, in allen Modulen). Dazu eine Sperre gegen echte API-Zugriffe und ein Sicherheitsnetz: ändert ein Test `conf/` oder `data/` im Projektordner, schlägt der Lauf am Ende fehl |
-| `tests/fakes.py` | `FakeGemini` (Files API, Batch-API, `generate_content`, zeichnet Aufrufe auf), `make_response`, `ApiError`, `FakeDrive`, `install`, `install_drive`. Für OpenAI: `FakeOpenAI` (Files API und Batch API, liefert echte SDK-Objekte `Batch` und `FileObject`), `make_openai_body` (Antwortrumpf wie in der Ausgabedatei), `OpenAIError`, `install_openai` |
-| `tests/helpers.py` | `wait_until`, `wait_for_run_end`, Verlauf lesen und schreiben, Eintrags-Vorlagen (`batch_entry`, `sync_entry`, `finished_batch`, `openai_entry`, `finished_openai_batch`, `row`), AppTest-Kürzel (`new_app`, `new_openai_app`, `click`, `set_prompts`, `captions`, `markdown`) |
+| `tests/fakes.py` | `FakeGemini` (Files API, Batch-API, `generate_content`, Interactions API mit `create`, `get` und `cancel`, zeichnet Aufrufe auf), `make_response`, `make_interaction` (echte SDK-Interaktion), `ApiError`, `InteractionsError`, `FakeDrive`, `install`, `install_drive`. Für OpenAI: `FakeOpenAI` (Files API und Batch API, liefert echte SDK-Objekte `Batch` und `FileObject`), `make_openai_body` (Antwortrumpf wie in der Ausgabedatei), `OpenAIError`, `install_openai` |
+| `tests/helpers.py` | `wait_until`, `wait_for_run_end`, Verlauf lesen und schreiben, Eintrags-Vorlagen (`batch_entry`, `sync_entry`, `background_entry`, `finished_batch`, `finished_background`, `openai_entry`, `finished_openai_batch`, `row`), AppTest-Kürzel (`new_app`, `new_openai_app`, `click`, `set_prompts`, `captions`, `markdown`) |
 | `tests/test_logic.py` | reine Logik: Parser, Hilfsfunktionen, Ordner und Altbestand, Verlaufsdatei, PDF-Upload, Batch-Anfragen, Wiederholungen, Gesprächsverlauf als Text (Aufbau, Wiedereinlesen, mehrfaches Fortsetzen) |
 | `tests/test_sync_worker.py` | synchroner Modus: Anfrageaufbau, Gespräche, Fehlerfälle, Abbruch, Zustände |
+| `tests/test_background.py` | Hintergrund-Modus: Anfrageaufbau (auch gegen das Schema des SDK), Start mit Wiederholung und Aufräumen bei Fehlern, Abfrage (laufend, beendet, `incomplete`, `failed`, `cancelled`, Long-Decode-Schritte), Abbruch, Zeilenparser, Oberfläche (Formular, Start, Jobs-Tab, Übernehmen, Hinweis bei abgeschnittenem Batch; Oberflächentests mit Marker `ui`) |
 | `tests/test_drive.py` | Drive-Anmeldung (Token, Neuanmeldung, Netzwerkfehler) und Laden von Dateien |
 | `tests/test_ui.py` | Oberfläche mit AppTest: Formular, Starts, Jobs-Tab, automatische Prüfung, Übernehmen, Löschen, Altbestand, Ordnerlage, Prompt-Anzeige, Gespräch fortsetzen (Marker `ui`) |
 | `tests/test_openai.py` | OpenAI-Anbindung: Anfrageaufbau, PDF-Upload, Ergebniszeilen, Status und Ergebnisdateien, Anbieter-Schalter, Formularwerte beim Anbieterwechsel (was die App dem Browser schickt), Start, Jobs-Tab, Übernehmen, Fortsetzen. Ein Test prüft, dass die Beispielantworten des Fakes gültige Objekte des SDK sind (Oberflächentests mit Marker `ui`) |
@@ -683,7 +735,7 @@ pytest tests/test_sync_worker.py -k group  # einzelne Datei oder Namensausschnit
 
 - Die Module von `gbui` werden in jedem Test frisch importiert (Fixture `fresh_package`) und als `app` bereitgestellt (`app.parse_line(...)`: der Name wird in allen Modulen gesucht, `app.modules["history"]` liefert ein Modul selbst). Streamlit-Aufrufe darin laufen im „bare mode“, das ist gewollt.
 - Die Oberfläche läuft in Streamlits `AppTest` (`new_app()`): Widgets per `key` ansprechen, Tabs über `at.session_state["view"]` wechseln, Uploads mit `at.file_uploader[0].set_value([(name, bytes, mime)])`.
-- Dienste ersetzt man mit `FakeGemini(...)` (Logiktests) bzw. `use_fake(...)` (Oberflächentests). Das Argument `script` bestimmt die Antworten von `generate_content` der Reihe nach: `"ok"`, `"empty"`, ein `dict` für `make_response`, oder eine Exception, die ausgelöst wird.
+- Dienste ersetzt man mit `FakeGemini(...)` (Logiktests) bzw. `use_fake(...)` (Oberflächentests). Das Argument `script` bestimmt die Antworten von `generate_content` der Reihe nach: `"ok"`, `"empty"`, ein `dict` für `make_response`, oder eine Exception, die ausgelöst wird. Für den Hintergrund-Modus bestimmt `interaction_results` je Interaktion, wie `interactions.get` antwortet (Argumente für `make_interaction` oder eine Exception), `interaction_create_errors` lässt einzelne `create`-Aufrufe scheitern.
 - OpenAI ersetzt `FakeOpenAI(...)` (in `test_openai.py` über `use_openai(...)`). `batch_status`, `failing`, `bodies` und `batch_errors` bestimmen, was die Batch API meldet und was in Ausgabe- und Fehlerdatei steht. Oberflächentests für OpenAI starten mit `new_openai_app()`: Der Anbieter ist dann schon gewählt, es wird nie ein Gemini-Client gebaut.
 - Drive ersetzt `install_drive(...)`: Anmeldung und Dienst sind Fakes, `token.json` liegt dann in `conf/` des Wegwerf-Ordners.
 
@@ -756,7 +808,12 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 | Meldung / Symptom | Ursache | Lösung |
 |---|---|---|
-| `400 INVALID_ARGUMENT … max_output_tokens cannot exceed 32768` | Batch unterstützt kein Long Decode | Im Batch höchstens 32.768 Token. Mehr nur synchron. |
+| `400 INVALID_ARGUMENT … max_output_tokens cannot exceed 32768` | Batch unterstützt kein Long Decode | Im Batch höchstens 32.768 Token. Mehr im Modus „Hintergrund“ oder synchron. |
+| Hintergrund: „Start fehlgeschlagen“ mit `400` | Die Interactions API hat die Anfrage abgelehnt. Laut Doku liefern `max_output_tokens` über 65.536 ohne `background=true` und `background=true` ohne `store=true` einen 400-Fehler, beides sendet die App richtig. Möglich bleiben ein zu großes `max_output_tokens` bei großer Eingabe (Doku: höchstens 1.048.576 minus Eingabe) oder ein Modell ohne Unterstützung für den Hintergrund-Modus | Meldung lesen, Limit verkleinern, Modellnamen prüfen. Schon gestartete Prompts desselben Laufs bricht die App ab. |
+| Hintergrund: „Abruf fehlgeschlagen … 403“ | Zugriff verweigert, vermutlich gehört der API-Key zu einem anderen Projekt als der, mit dem der Lauf gestartet wurde (ungeprüft) | Den Key des Startprojekts eintragen (Seitenleiste). |
+| Hintergrund: Ergebnis „Die Interaktion gibt es bei Google nicht mehr“ | Google antwortet mit 404: Die Aufbewahrung ist abgelaufen oder die Interaktion wurde gelöscht, und das Ergebnis wurde lokal nie gesichert, weil noch nicht alle Prompts beendet waren | Nichts zu retten. Mit „Eingaben übernehmen“ neu starten. Beendete Läufe sichert die App lokal, sobald alle Prompts fertig sind. |
+| Hintergrund: Status `incomplete` oder Warnung `MAX_TOKENS` | Denk- plus Ausgabe-Token haben das Limit erreicht | Limit erhöhen (bis 1.048.576 minus Eingabe) oder Denktiefe senken. |
+| Hintergrund: „Eingabe“ viel größer als das PDF | Bei Long Decode zählt `total_input_tokens` die Eingabe jedes 64K-Schritts erneut mit | Normal, der größte Teil davon ist Cache (95 % günstiger). Kontextgröße = PDF plus Denk- plus Ausgabe-Token. |
 | `OSError: inotify watch limit reached` im Terminal | Linux-Limit für Dateibeobachtung erschöpft (oft durch IDE oder Sync-Programm). Die App läuft trotzdem, nur das automatische Neuladen bei Codeänderung fehlt | `--server.fileWatcherType none` oder in `.streamlit/config.toml` setzen, oder `fs.inotify.max_user_watches` erhöhen. |
 | pip-Fehler zu `tensorboard`/`tensorflow` nach Installation | `google-auth-oauthlib` oder `numpy`/`protobuf` wurden hochgezogen, bestehende Pakete verlangen ältere Versionen | Eigene Umgebung benutzen (siehe 3), oder `pip install "google-auth-oauthlib<1.1"`. Kein `-U` in gemeinsamen Umgebungen. |
 | `FutureWarning` von `google.api_core` im pytest-Lauf (Python 3.11, altes `grpcio`) | Hinweis von Google auf künftige Support-Enden. Für App und Tests harmlos | `pytest.ini` blendet beide Meldungen aus. Dauerhaft beheben: eigene Umgebung mit Python 3.12 oder neuer und `pip install -U grpcio`. |
@@ -766,7 +823,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 | Drive fragt nach einer Woche erneut nach Anmeldung | „Testing“-Status, Freigabe läuft nach 7 Tagen ab | erwartetes Verhalten, die App meldet sich selbst neu an. Dauerhaft: „Publish app“ oder Workspace „Internal“. |
 | Start bricht ab, Statusfeld verschwindet | Tab während der Vorbereitung gewechselt (löst einen Rerun aus) | Start wiederholen und währenddessen im Tab bleiben. |
 | Synchroner Lauf steht auf „unterbrochen“ | App wurde beendet oder neu gestartet, solange er lief | Bisherige Zeilen sind gespeichert. Mit „Eingaben übernehmen“ neu starten. |
-| Antwort abgeschnitten, Warnung `MAX_TOKENS` | Denk- plus Ausgabe-Token haben das Limit erreicht | Denktiefe senken, Token-Limit erhöhen (synchron) oder Aufgabe auf mehrere Prompts aufteilen. |
+| Antwort abgeschnitten, Warnung `MAX_TOKENS` | Denk- plus Ausgabe-Token haben das Limit erreicht | Denktiefe senken, Token-Limit erhöhen (synchron oder im Modus „Hintergrund“) oder Aufgabe auf mehrere Prompts aufteilen. |
 | „Gespräch“: Prompt 2 „Übersprungen“ | Prompt 1 lieferte Fehler oder keine Antwort | Fehler in Prompt 1 beheben und neu starten. Folgende Paare laufen weiter. |
 | Synchron nur 32.768 Ausgabe-Token wählbar, Warnung zu google-genai | SDK älter als 2.30.1 | `pip install -U google-genai` (in eigener Umgebung). |
 | Automatische Prüfung läuft auch im Tab „Neue Anfrage“ | Streamlit älter als 1.55, kennt den aktiven Tab nicht | Streamlit aktualisieren. |
@@ -789,6 +846,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - OpenAI bekommt PDFs mit Text und Seitenbildern, die Detailstufe (`detail`) ist nicht einstellbar. Die Eingabe-Token können sich deshalb von denen bei Gemini unterscheiden.
 - Implizites Caching ist nicht garantiert und bei Carbon (wie bei Argon) die einzige Cache-Art. Im Batch gibt es dazu keine Doku, synchron ist es bestmöglich vorbereitet, aber unbewiesen.
 - Synchron läuft **sequenziell**. Parallele Anfragen würden Cache-Treffer am Anfang eher verhindern.
+- Der Modus „Hintergrund“ startet alle Prompts **gleichzeitig** (mögliche Ratenbegrenzungen bei vielen Prompts, ein Cache-Treffer fürs PDF ist weniger wahrscheinlich), kennt keine Gespräche (je Prompt eine Interaktion, eine Fortsetzung steckt im Prompt), hat keinen Batch-Rabatt und zeigt keine Zwischenstände oder Denk-Zusammenfassungen. Eine Interaktion läuft laut Google höchstens 24 Stunden, danach gilt sie als `failed`. Long Decode im **Batch** gibt es nicht, solange die Interactions API keinen Batch kennt.
 - Der Start (Dateien laden, hochladen) läuft im Hauptskript. Ein Tab-Wechsel währenddessen bricht ihn ab (im Statusfeld vermerkt).
 - Die Sperre in `runtime()` gilt nur innerhalb **eines** Streamlit-Prozesses. Nicht zwei Instanzen im selben Ordner starten.
 - Der Verlauf wächst ohne Seitenaufteilung. Löschen geht nur einzeln. `data/requests_*.jsonl` sammeln sich an.
@@ -806,6 +864,8 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Streaming der Antworten im synchronen Modus mit Zwischenständen im Eintrag.
 - Eingaben des Formulars beim Neustart wiederherstellen.
 - Fortsetzung als echter Mehr-Runden-Verlauf (`user`/`model`-Nachrichten statt Text im Prompt). Dazu müsste der Eintrag die Modellantworten samt Denk-Signaturen speichern.
+- Long Decode im Batch, sobald Google die Interactions API für die Batch API öffnet (laut Doku „noch nicht verfügbar“), und die clientseitige Fortsetzung der Interactions API (laut Doku „bald“) als Alternative ohne Speicherung auf dem Server.
+- Streaming für Hintergrund-Läufe (`stream`, `thinking_summaries`) mit Zwischenständen im Eintrag.
 - Tarif/Modus „Flex“ oder andere Preisstufen, falls Google sie für Carbon anbietet (Doku prüfen).
 - Explizites Caching als Umschalter für Modelle, die es unterstützen.
 - Aufräumen alter `data/requests_*.jsonl` (und `data/requests_openai_*.jsonl`).
@@ -825,7 +885,7 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 
 **Verifikationsstand (bitte beim ersten echten Einsatz beobachten)**
 
-- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 239 Tests liefen grün in frisch installierten Umgebungen mit Python 3.12.3: mit den neuesten Versionen (Streamlit 1.67.0, google-genai 3.2.0, openai 3.49.0) und mit der niedrigsten unterstützten Kombination (Streamlit 1.56.0, google-genai 2.30.1, openai 1.100.0). Mit Streamlit 1.55.0 laufen alle bis auf die sechs Upload-Tests (drei in `tests/test_ui.py`, drei in `tests/test_openai.py`), die `AppTest` dort noch nicht unterstützt. Mit Python 3.11.18 (neueste Versionen) liefen ebenfalls alle 239 Tests grün. Die GitHub-Actions-Matrix deckt 3.11 und 3.12 ab.
+- Automatisierte Tests (`pytest`, Abschnitt 9.3) prüfen die App durchgehend gegen Ersatzdienste. Sie bestätigen die Logik, nicht das Verhalten der echten Google-Dienste. Alle 287 Tests (Stand der Änderung für Issue #19) liefen grün in frisch installierten Umgebungen: mit Python 3.12.3 und den neuesten Versionen (Streamlit 1.67.0, google-genai 3.3.0, openai 3.50.0), mit Python 3.12.3 und google-genai 2.30.1 (Streamlit 1.67.0, openai 3.50.0) sowie mit Python 3.11.15 (Streamlit 1.67.0, google-genai 3.3.0, openai 3.51.0). Für die 239 Tests davor gilt zusätzlich: Sie liefen auch mit der niedrigsten unterstützten Kombination (Streamlit 1.56.0, google-genai 2.30.1, openai 1.100.0), und mit Streamlit 1.55.0 laufen alle bis auf die sechs Upload-Tests (drei in `tests/test_ui.py`, drei in `tests/test_openai.py`), die `AppTest` dort noch nicht unterstützt. Beides wurde für die neuen Tests nicht wiederholt. Die GitHub-Actions-Matrix deckt 3.11 und 3.12 ab.
 - Die Aufteilung in Module (Abschnitt 8) wurde zusätzlich ohne die Testsuite geprüft: Ein Vergleich der Syntaxbäume mit dem Stand davor zeigte, dass der Code unverändert verschoben wurde (nur `_base_dir()` ist angepasst, weil nun der Ort des Pakets zählt) und der Oberflächenteil identisch ist. Außerdem lief die App unter einem echten `streamlit run` (Streamlit 1.55.0, 1.56.0 und 1.67.0) gegen eine echte WebSocket-Sitzung ohne Browser: Beide Tabs wurden ohne Ausnahme gezeichnet, und nach einer Änderung an `gbui/config.py` zeigte der nächste Lauf den neuen Wert (die Module wurden neu importiert). Dieser Serverlauf gehört nicht zur Testsuite.
 - „Gespräch fortsetzen“ und die Prompt-Anzeige wurden zusätzlich einmal in einem echten Headless-Chromium gegen die laufende App mit Ersatzdiensten durchgespielt (Klick im Fragment, Tab-Wechsel, Hinweis, Startsperre, zweites Fortsetzen ohne Verschachtelung). Dieser Browsertest gehört nicht zur Testsuite.
 - Der Anbieterwechsel (Gemini, OpenAI, zurück zu Gemini, mit leerem und mit gesetztem OpenAI-Key, auch bei geöffnetem Jobs-Tab) wurde ebenfalls in einem echten Headless-Chromium gegen die laufende App durchgespielt. Modell, Denktiefe, Token-Limit, Prompts und Systemanweisung blieben erhalten, beide Anbieter behielten ihre eigenen Werte. Ohne die Zuweisung vor dem Zeichnen (`FORM_KEYS`) standen nach dem Rückwechsel das Modellfeld leer, das Token-Limit auf 256, die Denktiefe auf „Standard“, und Prompts und Systemanweisung fehlten. Auch dieser Browsertest gehört nicht zur Testsuite.
@@ -834,6 +894,8 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - **Umstellung auf Gemini 4 Carbon: nur anhand der Google-Dokumentation (11.11.2026) und mit den simulierten Diensten der Testsuite geprüft**, nicht gegen die echte API. Geändert wurden der Modellname (`DEFAULT_MODEL`), Beschriftungen und die Doku. Anfrageformat, `thinking_level`-Werte, SDK-Mindestversion (2.30.1 für `generate_content`) und Token-Limits blieben unverändert, weil Google den Umstieg von Argon als reinen Modellnamenwechsel beschreibt.
 - **Nur mit simulierten Diensten getestet**, nicht gegen echte Dienste: synchroner Modus (inklusive Long Decode und Gespräche), mehrere PDFs, Drive-Anbindung samt Neuanmeldung, lokale Sicherung der Batch-Ergebnisse, „Eingaben übernehmen“, „Gespräch fortsetzen“ (wie das Modell auf einen Prompt mit eingefügtem Verlauf antwortet), Löschen, Fehlerzähler der automatischen Prüfung. Die Ordnerstruktur (`src/`, `conf/`, `data/`) samt Übernahme alter Dateien lief nur in Wegwerf-Ordnern, noch nicht im echten Projektordner.
 - **OpenAI-Anbindung: nur mit simulierten Diensten getestet**, nicht gegen die echte OpenAI-API (in der Entwicklungsumgebung gab es weder Key noch Zugriff). `FakeOpenAI` liefert echte SDK-Objekte (`Batch`, `FileObject`), und ein Test stellt sicher, dass die Beispielantworten gültige `Response`-Objekte des SDK sind (openai 3.46.0). Feldnamen, Endpunkt, Parameter und die erlaubten Denktiefen stammen aus der OpenAI-Dokumentation und dem SDK. Ungeprüft, bitte beim ersten echten Einsatz beobachten: ob ein Batch am Endpunkt `/v1/responses` PDFs per `file_id` (`input_file`) annimmt (die gelesenen Dokumentationsstellen schließen es nicht aus, bestätigen es für Batches aber auch nicht), welche Denktiefen das gewählte Modell kennt, ob Cache-Treffer im Batch vorkommen, die Fehlercodes der Fehlerdatei (die Beispiele in den Tests sind nicht aus echten Läufen) und die Meldung bei überschrittenem Warteschlangenlimit.
+- **Hintergrund-Modus (Issue #19): nur anhand der Google-Dokumentation (Long Decode, Background Execution, Interactions API, Developer Guide zu Carbon, Stand 13.11.2026) und mit den simulierten Diensten der Testsuite geprüft**, nicht gegen die echte API (in der Entwicklungsumgebung gab es keinen API-Key). `FakeGemini` liefert echte SDK-Objekte (`google.genai.interactions.Interaction`), und ein Test stellt sicher, dass die gesendete Anfrage dem Schema des SDK entspricht (`CreateModelInteraction`). Ungeprüft, bitte beim ersten echten Einsatz beobachten: ob `gemini-4-carbon` die Interactions API mit `background=true` wie dokumentiert annimmt (der Developer Guide zu Carbon beschreibt `background=True`, die Doku zu Background Execution nennt in ihrer Modellliste, Stand 21.10.2026, nur Argon und Gemini 3.8 Flash), ob die Files-API-Referenz eines PDFs als `document` mit `uri` angenommen wird (so zeigt es die Doku zur Dokumentverarbeitung), ob die API ein `max_output_tokens` nahe 1.048.576 bei großer Eingabe ablehnt oder kürzt (Doku: „minus Eingabe“), ob mehrere gleichzeitige Läufe in Ratenbegrenzungen laufen und wie die Abrechnung der Schritte aussieht. Die App behandelt jeden Status außer `in_progress` und `queued` als Ende, damit eine unerwartete Statusangabe das Abfragen nicht endlos weiterlaufen lässt.
+- Zur Frage in Issue #19, ob Carbon ohne Long Decode schon 65.536 statt 32.768 schafft: laut Google-Doku **ja, aber nur in der Interactions API** (Standardlimit 65.536, ohne `background=true` auch Obergrenze). Der Batch läuft über `generateContent` (nicht streamend 32.768 je Anfrage) und die Interactions API kennt laut Doku noch keinen Batch. Ob Carbon im Batch dennoch mehr als 32.768 annimmt, bleibt **ungeprüft** (Prüfweg in Abschnitt 5, Tabelle „Batch-Ausgabelimit“).
 - Ungeprüft, bisher nur mit Argon beobachtet oder dokumentiert: ob die Batch-Antworten für Carbon ein Cache-Feld unter anderem Namen führen (siehe `usage`-JSON), ob der Batch bei Carbon dasselbe Ausgabelimit von 32.768 Token hat, ob der synchrone Aufruf mit `thinking_level` und Long Decode bei Carbon exakt wie dokumentiert antwortet und ob die 25 Minuten Timeout für `high` reichen.
 
 **Quellen** (Stand Oktober 2026, bitte auf Änderungen prüfen)
@@ -843,6 +905,11 @@ Die Datei `.github/workflows/tests.yml` führt die Testsuite auf GitHub aus, ohn
 - Gemini 4 Argon, Modellseite: <https://ai.google.dev/gemini-api/docs/models/gemini-4-argon>
 - Was ist neu in Gemini 4 Argon (Denktiefe, Long Decode, Timeouts, Caching): <https://ai.google.dev/gemini-api/docs/generate-content/latest-model>
 - Batch-API (JSONL-Format, Preis, Aufbewahrung): <https://ai.google.dev/gemini-api/docs/batch-api>
+- Long Decode (Interactions API, `background=true`, Limits, Abrechnung, Statuswerte): <https://ai.google.dev/gemini-api/docs/long-decode>
+- Background Execution (Anlegen, Abfragen, Abbrechen, Aufbewahrung): <https://ai.google.dev/gemini-api/docs/background-execution>
+- Interactions API (Überblick, Aufbewahrung 55 Tage, Batch API „noch nicht verfügbar“): <https://ai.google.dev/gemini-api/docs/interactions-overview>
+- Long Decode mit `generateContent` (clientseitige Fortsetzung, 32K je nicht streamender Anfrage): <https://ai.google.dev/gemini-api/docs/generate-content/long-decode>
+- Gemini 4 Carbon: Developer Guide (65.536 Standardlimit der Interactions API, `background=True` bis 1M): <https://aistudio.google.com/learn/gemini-4-carbon-developer-guide>
 - Context Caching (implizit/explizit, Nutzungsfelder): <https://ai.google.dev/gemini-api/docs/caching>
 - Drive-API-Quickstart für Python (OAuth-Einrichtung): <https://developers.google.com/workspace/drive/api/quickstart/python>
 - Streamlit-Dokumentation (`st.tabs`, `st.fragment`, `AppTest`): <https://docs.streamlit.io>
@@ -863,7 +930,8 @@ OpenAI (Stand 10.11.2026, bitte auf Änderungen prüfen):
 - **Prefix**: der gemeinsame Anfang zweier Anfragen. Implizites Caching greift darauf.
 - **Implizites Caching**: Google erkennt gleiche Anfänge automatisch und berechnet sie günstiger. Keine Zusage.
 - **Explizites Caching**: man legt selbst einen Cache an und referenziert ihn. Garantiert die Ersparnis, für Carbon und Argon nicht verfügbar.
-- **Long Decode**: automatische Fortsetzung über mehrere Teilanfragen, wenn die Ausgabe das Limit pro Anfrage überschreitet (SDK ab 2.30.1, nur synchron).
+- **Long Decode**: automatische Fortsetzung über mehrere Teilanfragen, wenn die Ausgabe das Limit pro Anfrage überschreitet. Synchron setzt das SDK (ab 2.30.1) fort, im Hintergrund-Modus Googles Server (Schritte zu je 64K Token). Im Batch gibt es das nicht.
+- **Hintergrund-Interaktion** (Background Execution): eine Anfrage der Interactions API mit `background=true`. Sie läuft bei Google bis zu 24 Stunden und wird über ihre ID abgefragt oder abgebrochen.
 - **Runde**: ein früherer Prompt samt deiner Antwort dazu. Ein Gesprächsverlauf besteht aus Runden (Abschnitt 7).
 - **Fragment**: ein Streamlit-Abschnitt, der sich allein neu ausführen kann (hier für die automatische Statusprüfung).
 - **ScriptRunContext**: Streamlits Laufzeitkontext. Hintergrund-Threads haben keinen, deshalb dort keine `st.*`-Aufrufe.

@@ -16,6 +16,7 @@ SOURCE_FILES = [APP_PATH, *sorted(PACKAGE_DIR.glob("*.py"))]  # aller Quelltext 
 PROVIDER_GEMINI, PROVIDER_OPENAI = "Gemini", "OpenAI"
 MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
 MODE_SYNC = "Synchron (nacheinander, Cache-Treffer möglich)"
+MODE_BG = "Hintergrund (Long Decode, läuft bei Google, Standardpreis)"
 TAB_NEW, TAB_JOBS = "Neue Anfrage", "Jobs und Ergebnisse"
 
 
@@ -88,6 +89,25 @@ def sync_entry(**over):
          "group": 2, "rows": [], "created": "2026-10-02T12:00:00"}
     e.update(over)
     return e
+
+
+def background_entry(**over):
+    """Frisch gestarteter Hintergrund-Eintrag (noch ohne Endzustand). Die IDs folgen dem Muster des Fake-Dienstes."""
+    e = {"name": "bg-20261112-230000-cccc", "mode": "background", "label": "lang-lauf", "model": "gemini-4-carbon",
+         "pdf": "a.pdf", "pdfs": ["a.pdf"], "prompts": {"prompt-1": "Eins", "prompt-2": "Zwei"}, "system": "",
+         "think": "high", "max_out": 262144,
+         "interactions": {"prompt-1": "v1_fake000001", "prompt-2": "v1_fake000002"},
+         "created": "2026-11-12T23:00:00"}
+    e.update(over)
+    return e
+
+
+def finished_background(**over):
+    """Hintergrund-Eintrag mit lokal gesichertem Endergebnis (jedes Feld lässt sich überschreiben)."""
+    e = {"state": "completed", "rows": [row(), row(key="prompt-2", prompt="Zwei")], "error": None,
+         "api_model": "gemini-4-carbon"}
+    e.update(over)
+    return background_entry(**e)
 
 
 def wait_for_run_end(home, index=0, timeout=15.0):

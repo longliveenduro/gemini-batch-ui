@@ -9,7 +9,7 @@ import time as real_time
 from pathlib import Path
 from types import SimpleNamespace
 
-from google.genai import types
+from google.genai import interactions, types
 from openai.types import Batch, FileObject
 
 
@@ -31,6 +31,34 @@ def make_response(text="Antwort", finish="STOP", prompt_tokens=100, cached=0, th
         usage_metadata=types.GenerateContentResponseUsageMetadata(
             prompt_token_count=prompt_tokens, cached_content_token_count=cached,
             candidates_token_count=out, thoughts_token_count=thoughts))
+
+
+class InteractionsError(Exception):
+    """Ähnelt den Fehlern des Interactions-SDK (APIStatusError): trägt den HTTP-Code im Attribut status_code."""
+
+    def __init__(self, status_code, message="Fehler"):
+        super().__init__(f"{status_code} {message}")
+        self.status_code = status_code
+
+
+def make_interaction(text="Antwort", *, status="completed", interaction_id="v1_fake000001", model="gemini-4-carbon",
+                     input_tokens=100, cached=0, thoughts=10, output=5, hops=1, errors=None):
+    """Echte SDK-Interaktion (google.genai.interactions.Interaction), wie interactions.get sie liefert. Bei Long Decode
+    kommt je Teilschritt (hops) ein model_output-Schritt dazu, der Text wird darauf verteilt. Ohne Text (None oder "")
+    gibt es nur Denk-Schritte. Gültig nach dem Schema des SDK, das prüft ein Test."""
+    pieces = [text] if hops == 1 else [f"{text} (Teil {n})" for n in range(1, hops + 1)]
+    steps = [{"type": "user_input", "content": [{"type": "text", "text": "Frage"}]},
+             {"type": "thought", "signature": "sig"}]
+    if text:
+        steps += [{"type": "model_output", "content": [{"type": "text", "text": piece}]} for piece in pieces]
+    payload = {"id": interaction_id, "status": status, "model": model, "created": "2026-11-12T22:00:00Z",
+               "updated": "2026-11-12T22:10:00Z", "steps": steps,
+               "usage": {"total_input_tokens": input_tokens, "total_cached_tokens": cached,
+                         "total_output_tokens": output, "total_thought_tokens": thoughts,
+                         "total_tokens": input_tokens + output + thoughts}}
+    if errors:
+        payload["errors"] = errors
+    return interactions.Interaction.model_validate(payload)
 
 
 def shape(contents):
@@ -128,6 +156,44 @@ class _Models:
         return resp
 
 
+class _Interactions:
+    """Interactions API (Hintergrund-Modus): create legt eine laufende Interaktion an, get liefert je nach
+    interaction_results den Stand (Reihenfolge der Anlage), cancel notiert nur."""
+
+    def __init__(self, parent):
+        self.p = parent
+
+    def create(self, **request):
+        p = self.p
+        n = p.interaction_create_calls
+        p.interaction_create_calls += 1
+        if n in p.interaction_create_errors:
+            raise p.interaction_create_errors[n]
+        p.interaction_requests.append(request)
+        interaction_id = f"v1_fake{len(p.interaction_requests):06d}"
+        p.interaction_ids.append(interaction_id)
+        return make_interaction("", status="in_progress", interaction_id=interaction_id)
+
+    def get(self, id, **kwargs):
+        p = self.p
+        p.interaction_gets.append(id)
+        n = int(id.rsplit("fake", 1)[1]) - 1  # die Nummer steckt in der ID (auch bei Einträgen, die nur im Verlauf stehen)
+        item = p.interaction_results[n] if n < len(p.interaction_results) else {}
+        if isinstance(item, Exception):
+            raise item
+        args = {"text": f"Hintergrund-Antwort {n + 1}", **item}
+        if args.get("status") in ("in_progress", "queued") and "text" not in item:
+            args["text"] = ""
+        return make_interaction(interaction_id=id, **args)
+
+    def cancel(self, id, **kwargs):
+        p = self.p
+        if p.interaction_cancel_error:
+            raise p.interaction_cancel_error
+        p.cancelled_interactions.append(id)
+        return make_interaction("", status="cancelled", interaction_id=id)
+
+
 class FakeGemini:
     """Ersatz für google.genai.Client.
 
@@ -138,11 +204,16 @@ class FakeGemini:
     batch_cached: Cache-Token in Batch-Ergebnissen.
     upload_state / get_states: Dateizustände der Files API (z. B. "PROCESSING", Exception für „abgelaufen“).
     on_call: Funktion f(index), die zu Beginn jedes generate_content-Aufrufs läuft.
+    interaction_results: je Interaktion (Reihenfolge der Anlage) die Argumente für make_interaction, mit denen
+            interactions.get antwortet (z. B. {"status": "in_progress"}), oder eine Exception. Fehlt ein Eintrag, ist
+            die Interaktion fertig. interaction_create_errors: {Nummer des create-Aufrufs ab 0: Exception}.
+            interaction_cancel_error: Fehler von interactions.cancel.
     """
 
     def __init__(self, script=None, *, delay=0.0, batch_state="JOB_STATE_SUCCEEDED", get_error=None,
                  batch_cached=0, batch_text=None, upload_state=None, get_states=None, on_call=None,
-                 create_error=None):
+                 create_error=None, interaction_results=None, interaction_create_errors=None,
+                 interaction_cancel_error=None):
         self.script = list(script or [])
         self.delay = delay
         self.batch_state = batch_state
@@ -158,7 +229,14 @@ class FakeGemini:
         self.uploads, self.jsonl_uploads, self.jsonl_configs = [], [], []
         self.batch_requests, self.created_batches, self.cancelled = [], [], []
         self.get_calls = 0
+        self.interaction_results = list(interaction_results or [])
+        self.interaction_create_errors = dict(interaction_create_errors or {})
+        self.interaction_cancel_error = interaction_cancel_error
+        self.interaction_create_calls = 0
+        self.interaction_requests, self.interaction_ids = [], []
+        self.interaction_gets, self.cancelled_interactions = [], []
         self.files, self.batches, self.models = _Files(self), _Batches(self), _Models(self)
+        self.interactions = _Interactions(self)
 
 
 def install(monkeypatch, fake):

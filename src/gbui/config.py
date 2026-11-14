@@ -40,13 +40,17 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 POLL_SECONDS = 10  # Abstand der automatischen Prüfung im Tab „Jobs und Ergebnisse“
 DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED",  # Gemini
         "completed", "failed", "cancelled", "expired"}  # OpenAI (Status der Batch API, klein geschrieben)
-BATCH_MAX_OUT = 32768      # Batch-Anfragen unterstützen kein Long Decode
+BATCH_MAX_OUT = 32768      # Batch läuft über generateContent (nicht streamend: 32.768 je Anfrage), kein Long Decode
 SYNC_MAX_OUT = 1_048_576   # synchron: Long Decode über das SDK (ab google-genai 2.30.1)
+BG_MAX_OUT = 1_048_576     # Hintergrund (Interactions API, background=true): Long Decode bis zum gemeinsamen Fenster
+BG_DEFAULT_OUT = 262_144   # Voreinstellung im Hintergrund: Google empfiehlt für schwere Aufgaben 262.144 als Start
+BG_RUNNING = {"in_progress", "queued"}  # Status einer Hintergrund-Interaktion, solange sie läuft (alles andere ist Ende)
 SYNC_TIMEOUT_MS = 25 * 60 * 1000  # Carbon denkt länger als Argon (Doku: Timeouts von mindestens 15 bis 20 Minuten)
 MAX_POLL_ERRORS = 3        # so viele Abruffehler hintereinander, dann stoppt die automatische Prüfung
 TABS = ["Neue Anfrage", "Jobs und Ergebnisse"]
 MODE_BATCH = "Batch (50 % Rabatt, Ergebnis nach Minuten bis Stunden)"
 MODE_SYNC = "Synchron (nacheinander, Cache-Treffer möglich)"
+MODE_BG = "Hintergrund (Long Decode, läuft bei Google, Standardpreis)"
 THINK_LEVELS = ["Standard", "low", "medium", "high"]
 # OpenAI: reasoning.effort. Welche Stufen ein Modell kennt, hängt vom Modell ab, die API lehnt andere ab.
 OPENAI_EFFORTS = ["Standard", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -57,7 +61,7 @@ OPENAI_FILE_TTL = 3 * 24 * 3600  # hochgeladene PDFs verfallen bei OpenAI nach 3
 # Anbieters, alles hinter st.stop()), und der Browser baut es dann mit dem Standardwert neu auf. Darum wird jeder Wert
 # vor dem Zeichnen neu zugewiesen: Das hält ihn am Leben und schickt ihn an den Browser.
 FORM_KEYS = ["model_gemini", "model_openai", "mode", "system", "raw", "group", "think", "effort", "max_batch",
-             "max_sync", "max_openai"]
+             "max_sync", "max_bg", "max_openai"]
 HINT = " (bitte den Tab nicht wechseln)"
 SEPARATOR = re.compile(r"^\s*---\s*$", re.M)  # eine Zeile nur mit --- trennt im Formular die Prompts
 # Gesprächsverlauf als Text („Gespräch fortsetzen“): Je Runde steht mein früherer Prompt und deine Antwort dazu.
