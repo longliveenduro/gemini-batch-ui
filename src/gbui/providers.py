@@ -1,8 +1,9 @@
-"""Anbieter (Gemini, OpenAI): Client bauen, Anbieter eines Eintrags, Status holen und sichern, Batch abbrechen.
-Hier kommt ein weiterer Anbieter dazu (siehe README, Abschnitt 9.2)."""
+"""Anbieter (Gemini, OpenAI): Client bauen, Anbieter und Betriebsart eines Eintrags, Status holen und sichern, Batch
+abbrechen. Hier kommt ein weiterer Anbieter dazu (siehe README, Abschnitt 9.2)."""
 import streamlit as st
 from google import genai
 
+from .background import cancel_background, fetch_background
 from .config import DONE, PROVIDER_GEMINI, PROVIDER_OPENAI
 from .history import mutate_jobs, runtime
 from .openai_batch import fetch_openai_batch, openai_client
@@ -18,8 +19,16 @@ def entry_provider(j):
     return PROVIDER_OPENAI if j.get("provider") == PROVIDER_OPENAI else PROVIDER_GEMINI
 
 
+def entry_mode(j):
+    """Betriebsart eines Eintrags: "sync", "background" oder "batch". Ältere Einträge haben kein Feld mode (Batch)."""
+    return j["mode"] if j.get("mode") in ("sync", "background") else "batch"
+
+
 def refresh(client, j):
-    if entry_provider(j) == PROVIDER_OPENAI:
+    if entry_mode(j) == "background":  # Hintergrund-Interaktionen: beendete Zeilen der letzten Abfrage bleiben stehen
+        known = (st.session_state.get("res:" + j["name"]) or {}).get("rows") or j.get("rows")
+        state, rows, err, api_model = fetch_background(client, j, known)
+    elif entry_provider(j) == PROVIDER_OPENAI:
         state, rows, err, api_model = fetch_openai_batch(client, j)
     else:
         job = client.batches.get(name=j["name"])
@@ -45,7 +54,9 @@ def batch_info(j):
 
 
 def cancel_batch(client, j):
-    if entry_provider(j) == PROVIDER_OPENAI:
+    if entry_mode(j) == "background":
+        cancel_background(client, j)
+    elif entry_provider(j) == PROVIDER_OPENAI:
         client.batches.cancel(j["name"])
     else:
         client.batches.cancel(name=j["name"])

@@ -3,9 +3,9 @@ from datetime import datetime
 
 import streamlit as st
 
-from .config import DONE, MAX_POLL_ERRORS, POLL_SECONDS, TALK_NEW
+from .config import BATCH_MAX_OUT, DONE, MAX_POLL_ERRORS, POLL_SECONDS, PROVIDER_GEMINI, TALK_NEW
 from .forms import continue_conversation
-from .providers import batch_info, cancel_batch, entry_provider, refresh
+from .providers import batch_info, cancel_batch, entry_mode, entry_provider, refresh
 from .sync import sync_view
 from .talk import conversation_text, entry_group, history_turns, parse_conversation, short_prompt
 
@@ -82,6 +82,10 @@ def show_rows(j, rows):
             fin = r.get("finish")
             if fin == "MAX_TOKENS":
                 st.warning("Abgeschnitten: Denk- und Ausgabe-Token haben das Limit erreicht.")
+                if entry_mode(j) == "batch" and entry_provider(j) == PROVIDER_GEMINI:
+                    st.caption(f"Ein Gemini-Batch ist auf {BATCH_MAX_OUT:,} Ausgabe-Token begrenzt. Mehr geht im Modus "
+                               "„Hintergrund“ (Long Decode). „Eingaben übernehmen“ holt Prompts und Einstellungen "
+                               "ins Formular.")
             elif fin not in (None, "STOP", "unbekannt"):
                 st.warning(f"Die Antwort endete mit dem Grund „{fin}“ und ist möglicherweise unvollständig.")
             st.caption(f"Modell {r.get('model', '?')}, Ende: {fin or '?'}, "
@@ -129,13 +133,15 @@ def job_panel(client, rt, j, polling):
         return sync_panel(rt, j["name"], polling)
     name = j["name"]
     errn_key, err_key = f"errn:{name}", f"err:{name}"
+    background = entry_mode(j) == "background"  # läuft bei Google, wird wie ein Batch abgefragt
+    cancel_label = "Läufe abbrechen" if background else "Batch abbrechen"
     no_client = client is None  # der API-Key des Anbieters dieses Eintrags fehlt
     if no_client:
         st.warning(f"Der {entry_provider(j)} API-Key fehlt (Seitenleiste): Die Knöpfe „Status prüfen“ und "
-                   "„Batch abbrechen“ sind gesperrt. Gesicherte Ergebnisse bleiben sichtbar.")
+                   f"„{cancel_label}“ sind gesperrt. Gesicherte Ergebnisse bleiben sichtbar.")
     b1, b2, _ = st.columns([1, 1, 3])
     manual = b1.button("Status prüfen / Ergebnisse laden", key="chk:" + name, disabled=no_client)
-    if b2.button("Batch abbrechen", key="cx:" + name, disabled=no_client):
+    if b2.button(cancel_label, key="cx:" + name, disabled=no_client):
         try:
             cancel_batch(client, j)
             st.warning("Abbruch angefordert. Der Status wird gleich aktualisiert.")
@@ -164,7 +170,8 @@ def job_panel(client, rt, j, polling):
         return
     if "res:" + name not in st.session_state:
         st.caption("Gesichertes Endergebnis aus data/batch_jobs.json, kein Abruf beim Anbieter nötig.")
-    st.write(f"Status: **{info['state']}**, Modell laut API: **{info.get('model') or 'unbekannt'}**")
+    progress = f", {len(info['rows'] or [])} von {len(j['prompts'])} Prompts fertig" if background else ""
+    st.write(f"Status: **{info['state']}**{progress}, Modell laut API: **{info.get('model') or 'unbekannt'}**")
     if info["error"]:
         st.error(info["error"])
     show_rows(j, info["rows"] or [])

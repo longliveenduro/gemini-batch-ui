@@ -2,11 +2,11 @@
 fortsetzen, Eintrag löschen). Callbacks setzen Widget-Werte, bevor das Widget im Lauf erzeugt wird."""
 import streamlit as st
 
-from .config import (BATCH_MAX_OUT, MODE_BATCH, MODE_SYNC, OPENAI_EFFORTS, OPENAI_MAX_OUT, PROVIDER_OPENAI,
-                     SYNC_MAX_OUT, TABS, TALK_NEW, THINK_LEVELS)
+from .config import (BATCH_MAX_OUT, BG_MAX_OUT, MODE_BATCH, MODE_BG, MODE_SYNC, OPENAI_EFFORTS, OPENAI_MAX_OUT,
+                     PROVIDER_OPENAI, SYNC_MAX_OUT, TABS, TALK_NEW, THINK_LEVELS)
 from .gemini import sdk_has_long_decode
 from .history import mutate_jobs, runtime
-from .providers import entry_provider
+from .providers import entry_mode, entry_provider
 from .talk import conversation_text
 
 
@@ -18,11 +18,12 @@ def fill_form(j, raw, group, text):
     """Callback-Hilfe: Formular „Neue Anfrage“ mit dem Prompt-Text raw und den Einstellungen eines Eintrags füllen
     und zu dem Tab wechseln. text beginnt den einmaligen Hinweis. Nur aus Callbacks aufrufen (Widget-Werte lassen
     sich nur setzen, bevor das Widget im Lauf erzeugt wurde)."""
-    ss, is_sync, prov = st.session_state, j.get("mode") == "sync", entry_provider(j)
+    ss, mode, prov = st.session_state, entry_mode(j), entry_provider(j)
+    is_sync = mode == "sync"
     ss["provider"] = prov
     if j.get("model"):
         ss["model_openai" if prov == PROVIDER_OPENAI else "model_gemini"] = j["model"]
-    ss["mode"] = MODE_SYNC if is_sync else MODE_BATCH
+    ss["mode"] = {"sync": MODE_SYNC, "background": MODE_BG}.get(mode, MODE_BATCH)
     ss["raw"] = raw
     ss["system"] = j.get("system", "")
     if prov == PROVIDER_OPENAI:
@@ -34,8 +35,13 @@ def fill_form(j, raw, group, text):
         if j.get("think") in THINK_LEVELS:
             ss["think"] = j["think"]
         if j.get("max_out"):
-            cap = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT) if is_sync else BATCH_MAX_OUT
-            ss["max_sync" if is_sync else "max_batch"] = max(256, min(int(j["max_out"]), cap))
+            if is_sync:
+                cap, field = (SYNC_MAX_OUT if sdk_has_long_decode() else BATCH_MAX_OUT), "max_sync"
+            elif mode == "background":
+                cap, field = BG_MAX_OUT, "max_bg"
+            else:
+                cap, field = BATCH_MAX_OUT, "max_batch"
+            ss[field] = max(256, min(int(j["max_out"]), cap))
     if is_sync:
         ss["group"] = min(max(int(group or 1), 1), 50)
     pdfs = j.get("pdf")

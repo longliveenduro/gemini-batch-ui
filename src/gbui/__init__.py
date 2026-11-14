@@ -7,8 +7,9 @@ Ein Modul importiert nur Module, die in dieser Liste über ihm stehen. So bleibt
     rows           Ergebniszeilen: gemeinsame Zeilenform, Parser für Gemini
     drive          Google Drive
     gemini         Gemini: PDF hochladen, Batch starten
+    background     Gemini: Hintergrund-Modus (Interactions API, Long Decode), starten, abfragen, abbrechen
     openai_batch   OpenAI: PDF hochladen, Batch starten, Ergebnisse lesen
-    providers      Anbieter: Client, Status holen und sichern, abbrechen
+    providers      Anbieter: Client, Betriebsart eines Eintrags, Status holen und sichern, abbrechen
     sync           synchroner Modus (Hintergrund-Thread)
     talk           Gesprächsverlauf als Text
     forms          Formular „Neue Anfrage“ und Verlaufseinträge (Callbacks)

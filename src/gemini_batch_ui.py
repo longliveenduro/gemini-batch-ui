@@ -2,9 +2,11 @@
 
 Start:    pip install -r requirements.txt && streamlit run src/gemini_batch_ui.py   (im Projektordner)
 API-Key:  Umgebungsvariablen GEMINI_API_KEY und OPENAI_API_KEY oder Seitenleiste.
-Anbieter: Gemini (Batch und Synchron) oder OpenAI (nur Batch, Responses-Endpunkt), gewählt in der Seitenleiste.
-Modi:     Batch (asynchron, 50 % Rabatt) oder Synchron (nur Gemini: nacheinander, impliziter Cache über alle Prompts,
-          optional in Gesprächen: je N Prompts bilden einen gemeinsamen Kontext, das nächste Gespräch beginnt neu).
+Anbieter: Gemini (Batch, Synchron und Hintergrund) oder OpenAI (nur Batch, Responses-Endpunkt), gewählt in der Seitenleiste.
+Modi:     Batch (asynchron, 50 % Rabatt), Synchron (nur Gemini: nacheinander, impliziter Cache über alle Prompts,
+          optional in Gesprächen: je N Prompts bilden einen gemeinsamen Kontext, das nächste Gespräch beginnt neu) oder
+          Hintergrund (nur Gemini: Interactions API mit background=true, Long Decode bis 1.048.576 Ausgabe-Token,
+          läuft bei Google und braucht die App nicht, Standardpreis).
 Ordner:   conf/ (Zugangsdaten, geheim: credentials.json, token.json) und data/ (batch_jobs.json = Verlauf und
           Ergebnisse, pdf_files.json und openai_files.json = hochgeladene PDFs, requests_*.jsonl = gesendete
           Batch-Anfragen).
@@ -23,16 +25,17 @@ from datetime import datetime
 import streamlit as st
 from google import genai
 
-from gbui.config import (BATCH_MAX_OUT, DEFAULT_MODEL, DEFAULT_OPENAI_MODEL, DONE, FORM_KEYS, HINT, MAX_POLL_ERRORS,
-                         MODE_BATCH, MODE_SYNC, OPENAI_EFFORTS, OPENAI_MAX_OUT, POLL_SECONDS, PROVIDER_GEMINI,
-                         PROVIDER_OPENAI, PROVIDERS, SEPARATOR, SYNC_MAX_OUT, TABS, TALK_NEW, THINK_LEVELS,
-                         prepare_folders)
+from gbui.background import start_background
+from gbui.config import (BATCH_MAX_OUT, BG_DEFAULT_OUT, BG_MAX_OUT, DEFAULT_MODEL, DEFAULT_OPENAI_MODEL, DONE, FORM_KEYS,
+                         HINT, MAX_POLL_ERRORS, MODE_BATCH, MODE_BG, MODE_SYNC, OPENAI_EFFORTS, OPENAI_MAX_OUT,
+                         POLL_SECONDS, PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDERS, SEPARATOR, SYNC_MAX_OUT, TABS,
+                         TALK_NEW, THINK_LEVELS, prepare_folders)
 from gbui.drive import drive_fetch, drive_id, drive_service
 from gbui.forms import delete_entry, entry_label, reuse_inputs
 from gbui.gemini import sdk_has_long_decode, start_batch, upload_pdf
 from gbui.history import load_jobs, mutate_jobs, runtime
 from gbui.openai_batch import start_openai_batch, upload_pdf_openai
-from gbui.providers import batch_info, entry_provider, make_client
+from gbui.providers import batch_info, entry_mode, entry_provider, make_client
 from gbui.sync import start_sync, sync_view
 from gbui.talk import entry_group, parse_conversation
 from gbui.views import job_panel
@@ -93,8 +96,8 @@ with tab_new:
         st.caption("Mit OpenAI läuft nur der Batch-Modus (50 % Rabatt, Ergebnis innerhalb von 24 Stunden). "
                    "Der synchrone Modus ist Gemini vorbehalten.")
     else:
-        mode = st.radio("Modus", [MODE_BATCH, MODE_SYNC], horizontal=True, key="mode")
-    sync = mode == MODE_SYNC
+        mode = st.radio("Modus", [MODE_BATCH, MODE_SYNC, MODE_BG], horizontal=True, key="mode")
+    sync, bg = mode == MODE_SYNC, mode == MODE_BG
     uploads = st.file_uploader("PDF-Dateien (mehrere möglich)", type="pdf", accept_multiple_files=True)
     with st.container(border=True):
         st.markdown("**PDFs aus Google Drive hinzufügen** (optional)")
@@ -166,11 +169,18 @@ with tab_new:
         max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=cap, step=1024, key="max_sync",
                                   help="Über 32768 setzt das SDK automatisch Long Decode ein "
                                        "(mehrere Teilanfragen, eine zusammengesetzte Antwort).")
+    elif bg:
+        st.session_state.setdefault("max_bg", BG_DEFAULT_OUT)
+        max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=BG_MAX_OUT, step=1024, key="max_bg",
+                                  help="Denk- und Ausgabe-Token zusammen. Bis 65536 ist es eine einzige Anfrage, darüber "
+                                       "setzen Googles Server die Antwort in Schritten zu je 64K Token fort (Long Decode). "
+                                       "Höchstens 1.048.576 Token minus Eingabe. Berechnet wird nur, was tatsächlich anfällt.")
     else:
         st.session_state.setdefault("max_batch", BATCH_MAX_OUT)
         max_out = c2.number_input("Max. Ausgabe-Token", min_value=256, max_value=BATCH_MAX_OUT, step=1024, key="max_batch",
-                                  help="Im Batch-Betrieb begrenzt die API die Ausgabe auf 32768 Token.")
-    kind = "openai" if provider == PROVIDER_OPENAI else "sync" if sync else "batch"
+                                  help="Im Batch-Betrieb begrenzt die API die Ausgabe auf 32768 Token. Mehr geht im "
+                                       "Modus „Hintergrund“ (Long Decode).")
+    kind = "openai" if provider == PROVIDER_OPENAI else "sync" if sync else "background" if bg else "batch"
     label = c3.text_input("Name", f"{kind}-{datetime.now():%Y%m%d-%H%M}", key="label_" + kind)
     talk_info = ""
     if sync and group > 1 and prompts:
@@ -190,6 +200,15 @@ with tab_new:
             "Es gilt der Standardpreis statt des Batch-Rabatts. Cache-Treffer siehst du unter „Jobs und Ergebnisse“."
             + talk_info
         )
+    elif bg:
+        st.caption(
+            f"{len(prompts)} Prompt(s) erkannt. Jeder Prompt läuft als Hintergrund-Interaktion bei Google (Interactions "
+            "API, background=true), alle gleichzeitig. Long Decode setzt die Antwort über 65.536 Token hinaus fort "
+            "(bis 1.048.576 Token minus Eingabe). Die App muss nicht laufen, sie fragt nur den Stand ab. Es gilt der "
+            "Standardpreis statt des Batch-Rabatts, und weil alle Prompts gleichzeitig starten, ist ein Cache-Treffer "
+            "für das PDF nicht garantiert. Gespräche mit mehreren Prompts gibt es hier nicht (je Prompt eine "
+            "Interaktion), eine Fortsetzung steckt im Prompt."
+        )
     elif provider == PROVIDER_OPENAI:
         st.caption(
             f"{len(prompts)} Prompt(s) erkannt. Die OpenAI Batch API kostet 50 % des Standardpreises und liefert die "
@@ -204,7 +223,7 @@ with tab_new:
             "Stelle, damit der Prefix identisch ist. Treffer siehst du unter „Jobs und Ergebnisse“."
         )
 
-    if st.button("Synchron starten" if sync else "Batch starten", type="primary",
+    if st.button("Synchron starten" if sync else "Im Hintergrund starten" if bg else "Batch starten", type="primary",
                  disabled=not prompts or bool(unfinished)):
         try:
             with st.status("Bereite Anfragen vor …" + HINT) as status:
@@ -225,6 +244,8 @@ with tab_new:
                 status.update(label="Starte …" + HINT)
                 if sync:
                     entry = start_sync(client, rt, model, pdfs, names, prompts, system.strip(), think, max_out, label, group)
+                elif bg:
+                    entry = start_background(client, rt, model, pdfs, names, prompts, system.strip(), think, max_out, label)
                 elif provider == PROVIDER_OPENAI:
                     batch_id, keyed = start_openai_batch(client, model, [f.id for f in pdfs], prompts, system.strip(),
                                                          think, max_out, label)
@@ -244,6 +265,9 @@ with tab_new:
             if sync:
                 st.success(f"{entry['name']} läuft im Hintergrund. Fortschritt und Ergebnisse siehst du im Tab "
                            "„Jobs und Ergebnisse“.")
+            elif bg:
+                st.success(f"{entry['name']} läuft bei Google. Im Tab „Jobs und Ergebnisse“ wird der Stand alle "
+                           f"{POLL_SECONDS} Sekunden geprüft, die App muss dafür nicht durchgehend laufen.")
             else:
                 st.success(f"{entry['name']} läuft. Im Tab „Jobs und Ergebnisse“ wird der Status alle "
                            f"{POLL_SECONDS} Sekunden geprüft.")
@@ -262,6 +286,7 @@ with tab_jobs:
         is_sync = j.get("mode") == "sync"
         grp, entry_prov = entry_group(j), entry_provider(j)
         kind_txt = ((f"synchron, {grp} Prompts pro Gespräch" if grp > 1 else "synchron") if is_sync
+                    else "Hintergrund (Long Decode)" if entry_mode(j) == "background"
                     else "Batch (OpenAI)" if entry_prov == PROVIDER_OPENAI else "Batch")
         st.caption(f"{j['name']}, {kind_txt}, gesendet: Modell {j['model']}, "
                    f"Denktiefe {j.get('think', 'unbekannt')}, max. {j.get('max_out', '?')} Ausgabe-Token, "

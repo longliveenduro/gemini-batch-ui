@@ -24,6 +24,7 @@ def result_line(key="prompt-1", text="Hallo", finish="STOP", usage=None, parts=N
 def test_ui_texts_used_by_tests_match_the_app(app):
     assert app.MODE_BATCH == helpers.MODE_BATCH
     assert app.MODE_SYNC == helpers.MODE_SYNC
+    assert app.MODE_BG == helpers.MODE_BG
     assert app.TABS == [helpers.TAB_NEW, helpers.TAB_JOBS]
 
 
