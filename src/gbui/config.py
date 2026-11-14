@@ -41,7 +41,7 @@ POLL_SECONDS = 10  # Abstand der automatischen Prüfung im Tab „Jobs und Ergeb
 DONE = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED",  # Gemini
         "completed", "failed", "cancelled", "expired"}  # OpenAI (Status der Batch API, klein geschrieben)
 BATCH_MAX_OUT = 32768      # Batch läuft über generateContent (nicht streamend: 32.768 je Anfrage), kein Long Decode
-SYNC_MAX_OUT = 1_048_576   # synchron: Long Decode über das SDK (ab google-genai 2.30.1)
+SYNC_MAX_OUT = 1_048_576   # synchron: Long Decode über das SDK
 BG_MAX_OUT = 1_048_576     # Hintergrund (Interactions API, background=true): Long Decode bis zum gemeinsamen Fenster
 BG_DEFAULT_OUT = 262_144   # Voreinstellung im Hintergrund: Google empfiehlt für schwere Aufgaben 262.144 als Start
 BG_RUNNING = {"in_progress", "queued"}  # Status einer Hintergrund-Interaktion, solange sie läuft (alles andere ist Ende)

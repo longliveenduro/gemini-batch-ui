@@ -2,7 +2,6 @@
 import shutil
 
 import pytest
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from fakes import ApiError, FakeDrive, FakeGemini, install, install_drive
@@ -13,8 +12,6 @@ from helpers import (APP_PATH, MODE_BATCH, MODE_SYNC, PACKAGE, PACKAGE_DIR, TAB_
 pytestmark = pytest.mark.ui
 
 PDF = "application/pdf"
-needs_tab_state = pytest.mark.skipif(tuple(int(x) for x in st.__version__.split(".")[:2]) < (1, 55),
-                                     reason="Die Tab-Erkennung braucht Streamlit ab 1.55")
 
 
 @pytest.fixture
@@ -267,7 +264,6 @@ def test_a_finished_batch_is_saved_locally_and_reopens_without_the_api(use_fake,
     assert fake.get_calls >= 1
 
 
-@needs_tab_state
 def test_polling_runs_only_while_the_jobs_tab_is_open(use_fake, home):
     write_history(home, [batch_entry()])
     fake = use_fake(batch_state="JOB_STATE_RUNNING")
